@@ -37,7 +37,7 @@ export async function exportUpdatedModpack(
         : "modpack-atualizado.zip";
 
     const archive = new JSZip();
-    archive.file(manifestName, JSON.stringify(manifest, null, 2));
+    addManifestToArchive(archive, manifestName, manifest, originalPack.format);
     const blob = await archive.generateAsync({ type: "blob" });
 
     triggerDownload(blob, filename);
@@ -93,7 +93,7 @@ export async function exportPortedModpack(
     const filename = targetFormat === "modrinth" ? "modpack-portado.mrpack" : "modpack-portado.zip";
 
     const archive = new JSZip();
-    archive.file(manifestName, JSON.stringify(manifest, null, 2));
+    addManifestToArchive(archive, manifestName, manifest, targetFormat);
     const blob = await archive.generateAsync({ type: "blob" });
 
     triggerDownload(blob, filename);
@@ -213,6 +213,24 @@ function createCurseForgeManifest(
   };
 }
 
+function addManifestToArchive(
+  archive: JSZip,
+  manifestName: string,
+  manifest: object,
+  format: UnifiedModpack["format"],
+): void {
+  archive.file(normalizeZipPath(manifestName), JSON.stringify(manifest, null, 2));
+
+  if (format === "curseforge") {
+    archive.folder(normalizeZipPath("overrides/"));
+    archive.folder(normalizeZipPath("overrides/mods/"));
+  }
+}
+
+function normalizeZipPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
 function toNumericId(value: string, fallback?: string | number): number {
   const parsedValue = Number(value);
   if (Number.isSafeInteger(parsedValue) && parsedValue >= 0) {
@@ -220,9 +238,13 @@ function toNumericId(value: string, fallback?: string | number): number {
   }
 
   const parsedFallback = Number(fallback);
-  return Number.isSafeInteger(parsedFallback) && parsedFallback >= 0
-    ? parsedFallback
-    : 0;
+  if (Number.isSafeInteger(parsedFallback) && parsedFallback >= 0) {
+    return parsedFallback;
+  }
+
+  throw new Error(
+    `Não é possível exportar o modpack CurseForge: ID inválido (${value || fallback || "ausente"}).`,
+  );
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
