@@ -1,5 +1,6 @@
 const CURSEFORGE_API_URL = "https://api.curseforge.com/v1/mods";
 const CURSEFORGE_SEARCH_URL = "https://api.curseforge.com/v1/mods/search";
+const CURSEFORGE_MODLOADER_URL = "https://api.curseforge.com/v1/minecraft/modloader";
 const CURSEFORGE_MINECRAFT_GAME_ID = 432;
 const CURSEFORGE_MOD_CLASS_ID = 6;
 const CURSEFORGE_BATCH_SIZE = 50;
@@ -45,6 +46,17 @@ interface CurseForgeApiResponse {
   data?: CurseForgeApiMod[];
 }
 
+interface CurseForgeModLoader {
+  name?: string;
+  gameVersion?: string;
+  latest?: string;
+  recommended?: string;
+}
+
+interface CurseForgeModLoaderResponse {
+  data?: CurseForgeModLoader[];
+}
+
 interface CurseForgeFileResponse {
   data?: CurseForgeFile[];
 }
@@ -67,6 +79,22 @@ export interface CurseForgeResolvedMod {
 }
 
 const resolvedModsCache = new Map<string, Promise<Map<string, CurseForgeResolvedMod>>>();
+const modLoaderVersionCache = new Map<string, Promise<string | undefined>>();
+
+export function resolveRecommendedModLoaderVersion(
+  gameVersion: string,
+  loader: string,
+): Promise<string | undefined> {
+  const cacheKey = `${gameVersion}|${loader.toLowerCase()}`;
+  const cached = modLoaderVersionCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchRecommendedModLoaderVersion(gameVersion, loader);
+  modLoaderVersionCache.set(cacheKey, request);
+  return request;
+}
 
 export function resolveCurseForgeMods(
   mods: Array<{ id: string; fileId?: string | number }>,
@@ -117,7 +145,6 @@ async function fetchResolvedMods(
     const apiMods = await fetchBatch(
       batch.map((mod) => Number(mod.id)).filter(Number.isSafeInteger),
       apiKey,
-      loader,
     );
     const apiFiles = await fetchFileBatch(
       batch.map((mod) => Number(mod.fileId)).filter(Number.isSafeInteger),
@@ -167,7 +194,6 @@ async function fetchResolvedMods(
 async function fetchBatch(
   modIds: number[],
   apiKey: string,
-  loader: string,
 ): Promise<Map<number, CurseForgeApiMod>> {
   if (modIds.length === 0) {
     return new Map();
@@ -182,7 +208,6 @@ async function fetchBatch(
       },
       body: JSON.stringify({
         modIds,
-        modLoaderType: getCurseForgeLoaderType(loader),
       }),
     });
 
@@ -249,36 +274,36 @@ function pickCompatibleFile(
   gameVersion: string,
   loader: string,
 ): { fileId: string; fileName: string; downloadUrl?: string } | undefined {
-  const compatibleFiles = (mod.latestFilesIndexes ?? [])
+  const indexedCandidates = (mod.latestFilesIndexes ?? [])
     .filter((file) => file.gameVersion === gameVersion)
-    .filter((file) => isCompatibleLoader(file.modLoader, loader));
-  const latestFileIndex = compatibleFiles
+    .filter((file) => isCompatibleLoader(file.modLoader, loader))
     .map((file) => ({
       index: file,
       details: mod.latestFiles?.find((candidate) => candidate.id === file.fileId),
-    }))
-    .sort((left, right) => {
-      const leftDate = left.details?.fileDate ?? "";
-      const rightDate = right.details?.fileDate ?? "";
-      return rightDate.localeCompare(leftDate) || right.index.fileId - left.index.fileId;
-    })[0]?.index;
-  const compatibleLatestFiles = (mod.latestFiles ?? [])
+    }));
+  const fileCandidates = [
+    ...indexedCandidates
+      .filter((candidate) => candidate.details)
+      .map((candidate) => candidate.details as CurseForgeFile),
+    ...(mod.latestFiles ?? []),
+  ]
     .filter((file) => file.gameVersions?.includes(gameVersion))
     .filter((file) => isCompatibleLoader(file.modLoader, loader));
-  const latestFile = compatibleLatestFiles.find(
-    (file) => file.id === latestFileIndex?.fileId,
-  ) ?? compatibleLatestFiles.sort((left, right) =>
-    (right.fileDate ?? "").localeCompare(left.fileDate ?? "") || right.id - left.id,
-  )[0];
+  const uniqueCandidates = Array.from(
+    new Map(fileCandidates.map((file) => [file.id, file])).values(),
+  );
+  const stableCandidates = uniqueCandidates.filter((file) => !isPreReleaseFile(file));
+  const candidates = stableCandidates.length > 0 ? stableCandidates : uniqueCandidates;
+  const latestFile = candidates.sort(compareCurseForgeFiles)[0];
 
-  if (!latestFileIndex && !latestFile) {
+  if (!latestFile) {
     return undefined;
   }
 
-  const fileId = String(latestFileIndex?.fileId ?? latestFile?.id);
+  const fileId = String(latestFile.id);
   return {
     fileId,
-    fileName: latestFileIndex?.filename ?? formatFile(latestFile, fileId),
+    fileName: formatFile(latestFile, fileId),
     downloadUrl: latestFile?.downloadUrl ?? undefined,
   };
 }
@@ -308,9 +333,18 @@ function formatResolvedMod(
     .filter((dependency) => dependency.relationType === 3)
     .map((dependency) => ({
       projectId: String(dependency.modId),
-      fileId: dependency.fileId === undefined
-        ? undefined
-        : String(dependency.fileId),
+      fileId: dependency.fileId !== undefined &&
+        (fileDetails.has(dependency.fileId) || mod.latestFiles?.some(
+          (file) => file.id === dependency.fileId,
+        )) &&
+        isCompatibleDependencyFile(
+          fileDetails.get(dependency.fileId) ?? mod.latestFiles?.find(
+            (file) => file.id === dependency.fileId,
+          ),
+          loader,
+        )
+        ? String(dependency.fileId)
+        : undefined,
     }));
 
   return {
@@ -326,6 +360,51 @@ function formatResolvedMod(
     loaderCompatible,
     requiredDependencies,
   };
+}
+
+async function fetchRecommendedModLoaderVersion(
+  gameVersion: string,
+  loader: string,
+): Promise<string | undefined> {
+  const apiKey = process.env.CURSEFORGE_API_KEY;
+  if (!apiKey || loader.toLowerCase() !== "neoforge") {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(CURSEFORGE_MODLOADER_URL);
+    url.searchParams.set("gameVersion", gameVersion);
+    const response = await fetch(url, { headers: { "x-api-key": apiKey } });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const body = (await response.json()) as CurseForgeModLoaderResponse;
+    const match = (body.data ?? []).find(
+      (entry) => entry.gameVersion === gameVersion &&
+        entry.name?.toLowerCase().includes("neoforge"),
+    );
+    return match?.recommended ?? match?.latest;
+  } catch {
+    return undefined;
+  }
+}
+
+function compareCurseForgeFiles(left: CurseForgeFile, right: CurseForgeFile): number {
+  return (right.fileDate ?? "").localeCompare(left.fileDate ?? "") || right.id - left.id;
+}
+
+function isPreReleaseFile(file: CurseForgeFile): boolean {
+  return /(?:snapshot|alpha|beta|rc|pre[- .]?release)/i.test(
+    `${file.displayName ?? ""} ${file.fileName ?? ""}`,
+  );
+}
+
+function isCompatibleDependencyFile(
+  file: CurseForgeFile | undefined,
+  loader: string,
+): boolean {
+  return file === undefined || isCompatibleLoader(file.modLoader, loader);
 }
 
 export interface CurseForgeSearchCandidate {

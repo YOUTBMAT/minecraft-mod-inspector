@@ -53,6 +53,13 @@ export async function analyzeModpack(
         continue;
       }
 
+      if (!resolvedMod.loaderCompatible && loader.toLowerCase() === "neoforge") {
+        report.status = "CONFLICT";
+        report.conflictDetails = [
+          `O mod ${resolvedMod.displayName} usa Fabric em um modpack NeoForge. Instale Sinytra Connector e Forgified Fabric API, ou substitua o mod por uma versão NeoForge.`,
+        ];
+      }
+
       if (resolvedMod.updateAvailable) {
         report.status = "SAFE_UPDATE";
         report.latestVersion = resolvedMod.latestVersion;

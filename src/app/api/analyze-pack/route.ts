@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import type { InstalledMod } from "@/types";
 import { analyzeModpack } from "@/lib/dependencyResolver";
 import { parseModpackManifest } from "@/lib/modpackParser";
-import { resolveCurseForgeMods } from "@/lib/curseforgeService";
+import {
+  resolveCurseForgeMods,
+  resolveRecommendedModLoaderVersion,
+} from "@/lib/curseforgeService";
 import { resolveModrinthProjectMeta } from "@/lib/modrinthService";
 import { detectKnownConflicts } from "@/lib/modConflicts";
 
@@ -20,6 +23,10 @@ export async function POST(request: Request) {
     const packInfo = parseModpackManifest(manifest);
     const gameVersion = packInfo.gameVersion;
     const loader = packInfo.loader;
+    const recommendedLoaderVersion = await resolveRecommendedModLoaderVersion(
+      gameVersion,
+      loader,
+    );
     const curseForgeMods = packInfo.format === "curseforge"
       ? await resolveCurseForgeMods(packInfo.mods, gameVersion, loader)
       : undefined;
@@ -28,6 +35,9 @@ export async function POST(request: Request) {
       : undefined;
     const enrichedPackInfo = {
       ...packInfo,
+      ...(recommendedLoaderVersion
+        ? { loaderVersion: recommendedLoaderVersion }
+        : {}),
       mods: packInfo.mods.map((mod) => ({
         ...mod,
         ...(curseForgeMods
