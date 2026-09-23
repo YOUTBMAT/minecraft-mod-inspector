@@ -4,6 +4,7 @@ const CURSEFORGE_MODLOADER_URL = "https://api.curseforge.com/v1/minecraft/modloa
 const CURSEFORGE_MINECRAFT_GAME_ID = 432;
 const CURSEFORGE_MOD_CLASS_ID = 6;
 const CURSEFORGE_BATCH_SIZE = 50;
+export const FABRIC_BRIDGE_PROJECT_IDS = ["883520", "882495"] as const;
 const CURSEFORGE_LOADER_TYPES: Record<string, number> = {
   forge: 1,
   fabric: 4,
@@ -18,6 +19,7 @@ interface CurseForgeFile {
   fileDate?: string;
   gameVersions?: string[];
   modLoader?: number;
+  releaseType?: number;
   downloadUrl?: string | null;
   dependencies?: CurseForgeFileDependency[];
 }
@@ -72,6 +74,7 @@ export interface CurseForgeResolvedMod {
   latestDownloadUrl?: string;
   updateAvailable: boolean;
   loaderCompatible: boolean;
+  requiresFabricBridge: boolean;
   requiredDependencies: Array<{
     projectId: string;
     fileId?: string;
@@ -287,13 +290,12 @@ function pickCompatibleFile(
       .map((candidate) => candidate.details as CurseForgeFile),
     ...(mod.latestFiles ?? []),
   ]
-    .filter((file) => file.gameVersions?.includes(gameVersion))
-    .filter((file) => isCompatibleLoader(file.modLoader, loader));
+    .filter((file) => isCompatibleFile(file, gameVersion, loader));
   const uniqueCandidates = Array.from(
     new Map(fileCandidates.map((file) => [file.id, file])).values(),
   );
-  const stableCandidates = uniqueCandidates.filter((file) => !isPreReleaseFile(file));
-  const candidates = stableCandidates.length > 0 ? stableCandidates : uniqueCandidates;
+  const stableCandidates = uniqueCandidates.filter((file) => file.releaseType === 1);
+  const candidates = stableCandidates;
   const latestFile = candidates.sort(compareCurseForgeFiles)[0];
 
   if (!latestFile) {
@@ -341,6 +343,7 @@ function formatResolvedMod(
           fileDetails.get(dependency.fileId) ?? mod.latestFiles?.find(
             (file) => file.id === dependency.fileId,
           ),
+          gameVersion,
           loader,
         )
         ? String(dependency.fileId)
@@ -358,6 +361,11 @@ function formatResolvedMod(
     latestDownloadUrl: compatible?.downloadUrl,
     updateAvailable: latestFileId !== installedFileId,
     loaderCompatible,
+    requiresFabricBridge: !loaderCompatible || requiredDependencies.some(
+      (dependency) => FABRIC_BRIDGE_PROJECT_IDS.includes(
+        dependency.projectId as (typeof FABRIC_BRIDGE_PROJECT_IDS)[number],
+      ),
+    ),
     requiredDependencies,
   };
 }
@@ -394,17 +402,12 @@ function compareCurseForgeFiles(left: CurseForgeFile, right: CurseForgeFile): nu
   return (right.fileDate ?? "").localeCompare(left.fileDate ?? "") || right.id - left.id;
 }
 
-function isPreReleaseFile(file: CurseForgeFile): boolean {
-  return /(?:snapshot|alpha|beta|rc|pre[- .]?release)/i.test(
-    `${file.displayName ?? ""} ${file.fileName ?? ""}`,
-  );
-}
-
 function isCompatibleDependencyFile(
   file: CurseForgeFile | undefined,
+  gameVersion: string,
   loader: string,
 ): boolean {
-  return file === undefined || isCompatibleLoader(file.modLoader, loader);
+  return file !== undefined && isCompatibleFile(file, gameVersion, loader);
 }
 
 export interface CurseForgeSearchCandidate {
@@ -470,6 +473,7 @@ function createFallbackMod(projectId: string, fileId: string): CurseForgeResolve
     latestFileId: fileId,
     updateAvailable: false,
     loaderCompatible: true,
+    requiresFabricBridge: false,
     requiredDependencies: [],
   };
 }
@@ -479,11 +483,24 @@ function formatFile(file: CurseForgeFile | undefined, fallbackId: string): strin
 }
 
 function isCompatibleLoader(modLoader: number | undefined, loader: string): boolean {
-  if (modLoader === undefined) {
-    return true;
-  }
-
   return modLoader === getCurseForgeLoaderType(loader);
+}
+
+function isCompatibleFile(
+  file: CurseForgeFile,
+  gameVersion: string,
+  loader: string,
+): boolean {
+  const gameVersions = file.gameVersions ?? [];
+  const normalizedLoader = loader.toLowerCase();
+  const hasGameVersion = gameVersions.includes(gameVersion);
+  const hasNeoForgeTag = gameVersions.some(
+    (version) => version.toLowerCase() === "neoforge",
+  );
+
+  return hasGameVersion &&
+    isCompatibleLoader(file.modLoader, loader) &&
+    (normalizedLoader !== "neoforge" || hasNeoForgeTag);
 }
 
 function getCurseForgeLoaderType(loader: string): number | undefined {

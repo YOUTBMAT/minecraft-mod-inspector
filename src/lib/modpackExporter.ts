@@ -216,13 +216,42 @@ function createCurseForgeManifest(
       version: originalPack.gameVersion,
       modLoaders: [
         {
-          id: `${originalPack.loader}-${originalPack.loaderVersion}`,
+          id: `${originalPack.loader}-${normalizeLoaderVersion(
+            originalPack.loader,
+            originalPack.loaderVersion,
+          )}`,
           primary: true,
         },
       ],
     },
     files,
   };
+}
+
+function normalizeLoaderVersion(loader: UnifiedModpack["loader"], version: string): string {
+  if (loader !== "neoforge") {
+    return version;
+  }
+
+  const minimumVersion = "21.1.248";
+  return compareLoaderVersions(version, minimumVersion) < 0
+    ? minimumVersion
+    : version;
+}
+
+function compareLoaderVersions(left: string, right: string): number {
+  const leftParts = left.match(/\d+/g)?.map(Number) ?? [];
+  const rightParts = right.match(/\d+/g)?.map(Number) ?? [];
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return 0;
 }
 
 function addManifestToArchive(

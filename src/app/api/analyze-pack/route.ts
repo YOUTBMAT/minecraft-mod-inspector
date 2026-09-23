@@ -3,6 +3,7 @@ import type { InstalledMod } from "@/types";
 import { analyzeModpack } from "@/lib/dependencyResolver";
 import { parseModpackManifest } from "@/lib/modpackParser";
 import {
+  FABRIC_BRIDGE_PROJECT_IDS,
   resolveCurseForgeMods,
   resolveRecommendedModLoaderVersion,
 } from "@/lib/curseforgeService";
@@ -27,6 +28,9 @@ export async function POST(request: Request) {
       gameVersion,
       loader,
     );
+    const loaderVersion = loader === "neoforge"
+      ? maxVersion(packInfo.loaderVersion, recommendedLoaderVersion, "21.1.248")
+      : packInfo.loaderVersion;
     const curseForgeMods = packInfo.format === "curseforge"
       ? await resolveCurseForgeMods(packInfo.mods, gameVersion, loader)
       : undefined;
@@ -35,9 +39,7 @@ export async function POST(request: Request) {
       : undefined;
     const enrichedPackInfo = {
       ...packInfo,
-      ...(recommendedLoaderVersion
-        ? { loaderVersion: recommendedLoaderVersion }
-        : {}),
+      loaderVersion,
       mods: packInfo.mods.map((mod) => ({
         ...mod,
         ...(curseForgeMods
@@ -65,6 +67,41 @@ export async function POST(request: Request) {
       packInfo.format,
       curseForgeMods,
     );
+
+    const requiresFabricBridge = loader === "neoforge" &&
+      Array.from(curseForgeMods?.values() ?? []).some(
+        (mod) => mod.requiresFabricBridge || mod.requiredDependencies.some(
+          (dependency) => FABRIC_BRIDGE_PROJECT_IDS.includes(
+            dependency.projectId as (typeof FABRIC_BRIDGE_PROJECT_IDS)[number],
+          ),
+        ),
+      );
+    const fabricBridgeMods = requiresFabricBridge
+      ? await resolveCurseForgeMods(
+          FABRIC_BRIDGE_PROJECT_IDS.map((id) => ({ id })),
+          gameVersion,
+          loader,
+        )
+      : undefined;
+    const exportPackInfo = {
+      ...enrichedPackInfo,
+      mods: [
+        ...enrichedPackInfo.mods,
+        ...(fabricBridgeMods
+          ? FABRIC_BRIDGE_PROJECT_IDS.map((id) => {
+              const bridgeMod = fabricBridgeMods.get(id);
+              return {
+                id,
+                fileId: bridgeMod?.latestFileId,
+                name: bridgeMod?.displayName,
+                version: bridgeMod?.latestVersion,
+              };
+            })
+          : []),
+      ].filter(
+        (mod, index, mods) => mods.findIndex((candidate) => candidate.id === mod.id) === index,
+      ),
+    };
 
     const conflicts = detectKnownConflicts(
       installedMods.map((mod) => ({
@@ -100,7 +137,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        packInfo: enrichedPackInfo,
+        packInfo: exportPackInfo,
         reports: Object.fromEntries(reports),
         conflicts,
         modNames: Object.fromEntries(modNames),
@@ -119,4 +156,24 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+}
+
+function maxVersion(...versions: Array<string | undefined>): string {
+  return versions.filter((version): version is string => version !== undefined)
+    .reduce((current, candidate) => compareVersions(candidate, current) > 0 ? candidate : current);
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.match(/\d+/g)?.map(Number) ?? [];
+  const rightParts = right.match(/\d+/g)?.map(Number) ?? [];
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return 0;
 }

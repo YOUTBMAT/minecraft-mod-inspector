@@ -4,7 +4,10 @@ import type {
   ModStatusType,
 } from "@/types";
 import { checkModrinthUpdate } from "@/lib/modrinthService";
-import type { CurseForgeResolvedMod } from "@/lib/curseforgeService";
+import {
+  FABRIC_BRIDGE_PROJECT_IDS,
+  type CurseForgeResolvedMod,
+} from "@/lib/curseforgeService";
 
 type ModrinthUpdate = Awaited<ReturnType<typeof checkModrinthUpdate>>;
 
@@ -58,6 +61,10 @@ export async function analyzeModpack(
         report.conflictDetails = [
           `O mod ${resolvedMod.displayName} usa Fabric em um modpack NeoForge. Instale Sinytra Connector e Forgified Fabric API, ou substitua o mod por uma versão NeoForge.`,
         ];
+      }
+
+      if (loader.toLowerCase() === "neoforge" && resolvedMod.requiresFabricBridge) {
+        report.requiredNewMods.push(...FABRIC_BRIDGE_PROJECT_IDS);
       }
 
       if (resolvedMod.updateAvailable) {
