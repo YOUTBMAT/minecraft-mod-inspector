@@ -63,12 +63,36 @@ export async function POST(request: Request) {
         slug: modrinthMeta?.get(mod.id)?.slug,
       })),
     );
+    const reportModIds = Array.from(reports.values()).flatMap((report) => [
+      ...report.requiredNewMods,
+      ...report.cascadingUpdates,
+      ...report.conflictingMods,
+    ]);
+    const allModrinthMeta = packInfo.format === "modrinth"
+      ? await resolveModrinthProjectMeta([
+          ...packInfo.mods.map((mod) => mod.id),
+          ...reportModIds,
+        ])
+      : modrinthMeta;
+    const modNames = new Map<string, string>();
+    for (const mod of packInfo.mods) {
+      if (mod.name) {
+        modNames.set(mod.id, mod.name);
+      }
+    }
+    for (const [id, mod] of curseForgeMods ?? []) {
+      modNames.set(id, mod.displayName);
+    }
+    for (const [id, mod] of allModrinthMeta ?? []) {
+      modNames.set(id, mod.title);
+    }
 
     return NextResponse.json(
       {
         packInfo: enrichedPackInfo,
         reports: Object.fromEntries(reports),
         conflicts,
+        modNames: Object.fromEntries(modNames),
       },
       { status: 200 },
     );

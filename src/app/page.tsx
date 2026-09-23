@@ -15,6 +15,7 @@ export default function HomePage() {
   const [packInfo, setPackInfo] = useState<UnifiedModpack>();
   const [reports, setReports] = useState<Record<string, ModAnalysisReport>>();
   const [conflicts, setConflicts] = useState<KnownConflictWarning[]>();
+  const [modNames, setModNames] = useState<Record<string, string>>();
   const [crashReport, setCrashReport] = useState<CrashAnalysisResult>();
   const [error, setError] = useState<string>();
 
@@ -22,10 +23,12 @@ export default function HomePage() {
     packInfo: UnifiedModpack;
     reports: Record<string, ModAnalysisReport>;
     conflicts?: KnownConflictWarning[];
+    modNames?: Record<string, string>;
   }) => {
     setPackInfo(data.packInfo);
     setReports(data.reports);
     setConflicts(data.conflicts);
+    setModNames(data.modNames);
     setCrashReport(undefined);
     setError(undefined);
   };
@@ -39,6 +42,7 @@ export default function HomePage() {
     setPackInfo(undefined);
     setReports(undefined);
     setConflicts(undefined);
+    setModNames(undefined);
     setCrashReport(undefined);
     setError(undefined);
   };
@@ -81,6 +85,7 @@ export default function HomePage() {
           onReset={handleReset}
           packInfo={packInfo}
           reports={reports}
+          modNames={modNames}
         />
       ) : (
         <section className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center gap-10 px-6 py-16">

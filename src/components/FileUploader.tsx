@@ -13,6 +13,7 @@ interface PackAnalysisData {
   packInfo: UnifiedModpack;
   reports: Record<string, ModAnalysisReport>;
   conflicts?: KnownConflictWarning[];
+  modNames?: Record<string, string>;
 }
 
 interface FileUploaderProps {

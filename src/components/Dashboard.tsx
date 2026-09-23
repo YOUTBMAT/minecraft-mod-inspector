@@ -17,6 +17,7 @@ interface DashboardProps {
   packInfo?: UnifiedModpack;
   reports?: Record<string, ModAnalysisReport>;
   conflicts?: KnownConflictWarning[];
+  modNames?: Record<string, string>;
   crashReport?: CrashAnalysisResult;
   onReset: () => void;
   onExport?: () => void;
@@ -44,6 +45,7 @@ export function Dashboard({
   packInfo,
   reports = {},
   conflicts = [],
+  modNames = {},
   crashReport,
   onReset,
   onExport,
@@ -155,6 +157,12 @@ export function Dashboard({
         installedVersion: "Não identificada",
         report,
       }));
+    const modsMap = new Map(Object.entries(modNames));
+    for (const mod of packInfo?.mods ?? []) {
+      if (mod.name && !modsMap.has(mod.id)) {
+        modsMap.set(mod.id, mod.name);
+      }
+    }
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredRows = rows.filter(({ report }) => {
@@ -338,6 +346,7 @@ export function Dashboard({
                     key={report.modId}
                     installedVersion={installedVersion}
                     report={report}
+                    modsMap={modsMap}
                     canExpand={canExpand}
                     isExpanded={isExpanded}
                     onToggle={() => setExpandedModId(isExpanded ? null : report.modId)}
@@ -362,17 +371,19 @@ export function Dashboard({
 function ModTableRows({
   installedVersion,
   report,
+  modsMap,
   canExpand,
   isExpanded,
   onToggle,
 }: {
   installedVersion: string;
   report: ModAnalysisReport;
+  modsMap: Map<string, string>;
   canExpand: boolean;
   isExpanded: boolean;
   onToggle: () => void;
 }) {
-  const detailItems = getDetailItems(report);
+  const detailItems = getDetailItems(report, modsMap);
 
   return (
     <>
@@ -674,13 +685,33 @@ function isExpandable(status: ModStatusType) {
   return status === "CASCADING_REQUIRED" || status === "MISSING_DEPENDENCY" || status === "CONFLICT";
 }
 
-function getDetailItems(report: ModAnalysisReport) {
+function getDetailItems(
+  report: ModAnalysisReport,
+  modsMap: Map<string, string>,
+) {
   return [
     { label: "Causas de conflito", items: report.conflictDetails ?? [] },
-    { label: "Atualizados junto", items: report.cascadingUpdates },
-    { label: "Novos exigidos", items: report.requiredNewMods },
-    { label: "Mods conflitantes", items: report.conflictingMods },
+    {
+      label: "Atualizados junto",
+      items: report.cascadingUpdates.map((id) => getModDisplayName(id, modsMap)),
+    },
+    {
+      label: "Novos exigidos",
+      items: report.requiredNewMods.map((id) => getModDisplayName(id, modsMap)),
+    },
+    {
+      label: "Mods conflitantes",
+      items: report.conflictingMods.map((id) => getModDisplayName(id, modsMap)),
+    },
   ];
+}
+
+export function getModDisplayName(
+  id: string,
+  modsMap: Map<string, string>,
+): string {
+  const name = modsMap.get(id);
+  return name ? `${name} (#${id})` : `Mod #${id}`;
 }
 
 function createFallbackReport(modId: string): ModAnalysisReport {
