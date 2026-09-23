@@ -87,6 +87,7 @@ export interface ModAnalysisReport {
   requiredNewMods: string[];
   cascadingUpdates: string[];
   conflictingMods: string[];
+  conflictDetails?: string[];
   latestFile?: LatestFileInfo;
 }
 

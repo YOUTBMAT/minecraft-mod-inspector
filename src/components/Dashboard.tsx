@@ -170,9 +170,10 @@ export function Dashboard({
   const safeUpdates = reportValues.filter(
     (report) => report.status === "SAFE_UPDATE",
   ).length;
-  const conflictCount = reportValues.filter(
-    (report) => report.status === "CONFLICT",
-  ).length;
+  const dependencyConflictCount = new Set(
+    reportValues.flatMap((report) => report.conflictDetails ?? []),
+  ).size;
+  const conflictCount = conflicts.length + dependencyConflictCount;
   const cascadingUpdates = reportValues.filter(
     (report) => report.status === "CASCADING_REQUIRED",
   ).length;
@@ -408,7 +409,7 @@ function ModTableRows({
           <td className="px-2 pb-5 pt-1 sm:px-3" colSpan={5}>
             <div className="rounded-lg border border-slate-200 bg-white p-4 transition-all">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Detalhes da análise</p>
-              <div className="mt-3 grid gap-4 sm:grid-cols-3">
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {detailItems.map(({ label, items }) => (
                   <div key={label}>
                     <p className="text-sm font-semibold text-slate-800">{label}</p>
@@ -675,6 +676,7 @@ function isExpandable(status: ModStatusType) {
 
 function getDetailItems(report: ModAnalysisReport) {
   return [
+    { label: "Causas de conflito", items: report.conflictDetails ?? [] },
     { label: "Atualizados junto", items: report.cascadingUpdates },
     { label: "Novos exigidos", items: report.requiredNewMods },
     { label: "Mods conflitantes", items: report.conflictingMods },
