@@ -191,9 +191,21 @@ function createCurseForgeManifest(
   originalPack: UnifiedModpack,
   mods: ExportMod[],
 ) {
+  const files = mods.flatMap((mod) => {
+    const projectID = toPositiveNumericId(mod.id);
+    const fileID = toPositiveNumericId(mod.version, mod.fileId);
+
+    if (projectID === undefined || fileID === undefined) {
+      return [];
+    }
+
+    return [{ projectID, fileID, required: true }];
+  });
+
   return {
     manifestType: "minecraftModpack",
     manifestVersion: 1,
+    overrides: "overrides",
     name: originalPack.name,
     version: "updated",
     minecraft: {
@@ -205,11 +217,7 @@ function createCurseForgeManifest(
         },
       ],
     },
-    files: mods.map((mod) => ({
-      projectID: toNumericId(mod.id),
-      fileID: toNumericId(mod.version, mod.fileId),
-      required: true,
-    })),
+    files,
   };
 }
 
@@ -219,7 +227,10 @@ function addManifestToArchive(
   manifest: object,
   format: UnifiedModpack["format"],
 ): void {
-  archive.file(normalizeZipPath(manifestName), JSON.stringify(manifest, null, 2));
+  archive.file(
+    normalizeZipPath(manifestName),
+    serializeManifest(manifest),
+  );
 
   if (format === "curseforge") {
     archive.folder(normalizeZipPath("overrides/"));
@@ -231,20 +242,31 @@ function normalizeZipPath(path: string): string {
   return path.replaceAll("\\", "/").replace(/^\/+/, "");
 }
 
-function toNumericId(value: string, fallback?: string | number): number {
-  const parsedValue = Number(value);
-  if (Number.isSafeInteger(parsedValue) && parsedValue >= 0) {
-    return parsedValue;
+function serializeManifest(manifest: object): string {
+  const json = JSON.stringify(manifest, null, 2);
+  JSON.parse(json);
+  return json;
+}
+
+function toPositiveNumericId(
+  value: string | number | undefined,
+  fallback?: string | number,
+): number | undefined {
+  if (value !== undefined && value !== null) {
+    const parsedValue = Number(value);
+    if (Number.isSafeInteger(parsedValue) && parsedValue > 0) {
+      return parsedValue;
+    }
   }
 
-  const parsedFallback = Number(fallback);
-  if (Number.isSafeInteger(parsedFallback) && parsedFallback >= 0) {
-    return parsedFallback;
+  if (fallback !== undefined && fallback !== null) {
+    const parsedFallback = Number(fallback);
+    if (Number.isSafeInteger(parsedFallback) && parsedFallback > 0) {
+      return parsedFallback;
+    }
   }
 
-  throw new Error(
-    `Não é possível exportar o modpack CurseForge: ID inválido (${value || fallback || "ausente"}).`,
-  );
+  return undefined;
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
