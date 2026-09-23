@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useState } from "react";
+import JSZip from "jszip";
 import type {
   CrashAnalysisResult,
   KnownConflictWarning,
@@ -43,8 +44,6 @@ export function FileUploader({
 
       const isLog = extension === "txt" || extension === "log";
       const endpoint = isLog ? "/api/analyze-log" : "/api/analyze-pack";
-      const formData = new FormData();
-      formData.append("file", file);
 
       setFileName(file.name);
       setIsLoading(true);
@@ -55,13 +54,30 @@ export function FileUploader({
       );
 
       try {
+        const request: RequestInit = isLog
+          ? {
+              method: "POST",
+              body: createFileFormData(file),
+            }
+          : {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(
+                await readModpackManifest(file, extension),
+              ),
+            };
         const response = await fetch(endpoint, {
-          method: "POST",
-          body: formData,
+          ...request,
         });
         const data: unknown = await response.json().catch(() => null);
 
         if (!response.ok) {
+          console.error("[FileUploader] Erro HTTP ao analisar arquivo", {
+            fileName: file.name,
+            endpoint,
+            status: response.status,
+            response: data,
+          });
           throw new Error(
             getErrorMessage(data) ??
               `Não foi possível analisar o arquivo (${response.status}).`,
@@ -74,6 +90,11 @@ export function FileUploader({
           onPackAnalyzed(data as PackAnalysisData);
         }
       } catch (error) {
+        console.error("[FileUploader] Falha no processamento do arquivo", {
+          fileName: file.name,
+          endpoint,
+          error,
+        });
         onError(
           error instanceof Error
             ? error.message
@@ -167,6 +188,62 @@ export function FileUploader({
       ) : null}
     </section>
   );
+}
+
+function createFileFormData(file: File): FormData {
+  const formData = new FormData();
+  formData.append("file", file);
+  return formData;
+}
+
+async function readModpackManifest(
+  file: File,
+  extension: string,
+): Promise<unknown> {
+  const text = extension === "zip" || extension === "mrpack"
+    ? await readManifestFromArchive(file)
+    : await file.text();
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("[FileUploader] Manifesto JSON inválido", {
+      fileName: file.name,
+      error,
+    });
+    throw new Error("O manifesto do modpack não contém JSON válido.");
+  }
+}
+
+async function readManifestFromArchive(file: File): Promise<string> {
+  try {
+    const archive = await JSZip.loadAsync(await file.arrayBuffer());
+    const entry = Object.values(archive.files).find(
+      (candidate) =>
+        candidate.name === "manifest.json" ||
+        candidate.name.endsWith("/manifest.json") ||
+        candidate.name === "modrinth.index.json" ||
+        candidate.name.endsWith("/modrinth.index.json"),
+    );
+
+    if (!entry || entry.dir) {
+      throw new Error(
+        "O arquivo não contém manifest.json ou modrinth.index.json.",
+      );
+    }
+
+    return await entry.async("text");
+  } catch (error) {
+    console.error("[FileUploader] Falha ao ler manifesto do ZIP/MRPACK", {
+      fileName: file.name,
+      error,
+    });
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Não foi possível ler o manifesto do modpack.",
+    );
+  }
 }
 
 function UploadIcon() {

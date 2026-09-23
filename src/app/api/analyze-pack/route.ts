@@ -1,26 +1,25 @@
 import { NextResponse } from "next/server";
 import type { InstalledMod } from "@/types";
 import { analyzeModpack } from "@/lib/dependencyResolver";
-import { parseModpackFile } from "@/lib/modpackParser";
+import { parseModpackManifest } from "@/lib/modpackParser";
 import { resolveCurseForgeMods } from "@/lib/curseforgeService";
 import { resolveModrinthProjectMeta } from "@/lib/modrinthService";
 import { detectKnownConflicts } from "@/lib/modConflicts";
 
 export async function POST(request: Request) {
   try {
-    const formData = await request.formData();
-    const fileEntry = formData.get("file");
-
-    if (!fileEntry || typeof fileEntry === "string") {
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
       return NextResponse.json(
-        { error: "O campo 'file' é obrigatório e deve conter um arquivo." },
-        { status: 400 },
+        { error: "Envie apenas o JSON do manifesto em application/json." },
+        { status: 415 },
       );
     }
 
-    const packInfo = await parseModpackFile(await fileEntry.arrayBuffer());
-    const gameVersion = getFormValue(formData, "gameVersion") ?? packInfo.gameVersion;
-    const loader = getFormValue(formData, "loader") ?? packInfo.loader;
+    const manifest = (await request.json()) as unknown;
+    const packInfo = parseModpackManifest(manifest);
+    const gameVersion = packInfo.gameVersion;
+    const loader = packInfo.loader;
     const curseForgeMods = packInfo.format === "curseforge"
       ? await resolveCurseForgeMods(packInfo.mods, gameVersion, loader)
       : undefined;
@@ -74,6 +73,10 @@ export async function POST(request: Request) {
       { status: 200 },
     );
   } catch (error) {
+    console.error("[analyze-pack] Falha ao analisar manifesto", {
+      contentType: request.headers.get("content-type"),
+      error,
+    });
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Falha ao analisar o modpack.",
@@ -81,9 +84,4 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
-}
-
-function getFormValue(formData: FormData, fieldName: string): string | undefined {
-  const value = formData.get(fieldName);
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

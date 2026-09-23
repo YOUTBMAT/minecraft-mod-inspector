@@ -17,7 +17,7 @@ export async function parseModpackFile(
 
     if (modrinthEntry) {
       const index = JSON.parse(await modrinthEntry.async("text")) as ModrinthIndex;
-      return normalizeModrinth(index);
+      return parseModpackManifest(index);
     }
 
     const curseForgeEntry = findArchiveEntry(archive, "manifest.json");
@@ -25,7 +25,7 @@ export async function parseModpackFile(
       const manifest = JSON.parse(
         await curseForgeEntry.async("text"),
       ) as CurseForgeManifest;
-      return normalizeCurseForge(manifest);
+      return parseModpackManifest(manifest);
     }
 
     throw new Error(
@@ -42,14 +42,7 @@ export async function parseModpackFile(
 
     try {
       const json = JSON.parse(decodeBuffer(fileBuffer)) as unknown;
-
-      if (isModrinthIndex(json)) {
-        return normalizeModrinth(json);
-      }
-
-      if (isCurseForgeManifest(json)) {
-        return normalizeCurseForge(json);
-      }
+      return parseModpackManifest(json);
     } catch {
       throw new Error(
         "Não foi possível ler o arquivo. Envie um modpack ZIP/MRPACK ou um manifesto JSON válido.",
@@ -62,6 +55,20 @@ export async function parseModpackFile(
       { cause: zipError },
     );
   }
+}
+
+export function parseModpackManifest(value: unknown): UnifiedModpack {
+  if (isModrinthIndex(value)) {
+    return normalizeModrinth(value);
+  }
+
+  if (isCurseForgeManifest(value)) {
+    return normalizeCurseForge(value);
+  }
+
+  throw new Error(
+    "Manifesto inválido. Esperado manifest.json do CurseForge ou modrinth.index.json.",
+  );
 }
 
 export function normalizeCurseForge(
