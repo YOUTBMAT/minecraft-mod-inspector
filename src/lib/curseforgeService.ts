@@ -417,7 +417,13 @@ function formatResolvedMod(
     latestFileId,
     latestFileName: compatible?.fileName,
     latestDownloadUrl: compatible?.downloadUrl,
-    updateAvailable: latestFileId !== installedFileId,
+    updateAvailable: Boolean(compatible) && isNewerFile(
+      fileDetails.get(Number(compatible?.fileId)) ?? mod.latestFiles?.find(
+        (file) => String(file.id) === compatible?.fileId,
+      ),
+      knownInstalledFile,
+      installedFileId,
+    ),
     loaderCompatible,
     supportsFabric,
     supportsForge,
@@ -484,6 +490,22 @@ async function fetchProjectBySlug(
 
 function compareCurseForgeFiles(left: CurseForgeFile, right: CurseForgeFile): number {
   return (right.fileDate ?? "").localeCompare(left.fileDate ?? "") || right.id - left.id;
+}
+
+function isNewerFile(
+  latest: CurseForgeFile | undefined,
+  installed: CurseForgeFile | undefined,
+  installedFileId: string,
+): boolean {
+  if (!latest || installedFileId === "unknown") {
+    return Boolean(latest);
+  }
+
+  if (!installed) {
+    return latest.id > Number(installedFileId);
+  }
+
+  return compareCurseForgeFiles(installed, latest) > 0;
 }
 
 function isCompatibleDependencyFile(

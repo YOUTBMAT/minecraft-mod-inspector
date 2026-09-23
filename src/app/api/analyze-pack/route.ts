@@ -89,6 +89,20 @@ export async function POST(request: Request) {
       ...enrichedPackInfo,
       mods: [
         ...enrichedPackInfo.mods,
+        ...(curseForgeMods
+          ? Array.from(curseForgeMods.values()).flatMap((resolvedMod) => {
+              if (packInfo.mods.some((mod) => mod.id === resolvedMod.projectId)) {
+                return [];
+              }
+
+              return [{
+                id: resolvedMod.projectId,
+                fileId: resolvedMod.latestFileId,
+                name: resolvedMod.displayName,
+                version: resolvedMod.latestVersion,
+              }];
+            })
+          : []),
         ...(fabricBridgeMods
           ? Array.from(fabricBridgeMods.values()).map((bridgeMod) => ({
               id: bridgeMod.projectId,

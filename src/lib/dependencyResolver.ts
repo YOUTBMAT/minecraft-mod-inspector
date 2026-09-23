@@ -70,14 +70,15 @@ export async function analyzeModpack(
         report.status = "SAFE_UPDATE";
         report.latestVersion = resolvedMod.latestVersion;
         report.latestFile = createCurseForgeLatestFile(resolvedMod);
-        roots.push({
-          rootId: installedMod.id,
-          requirements: toCurseForgeRequirements(
-            installedMod.id,
-            resolvedMod,
-            installedMod.id,
-          ),
-        });
+      }
+
+      const requirements = toCurseForgeRequirements(
+        installedMod.id,
+        resolvedMod,
+        installedMod.id,
+      );
+      if (requirements.length > 0) {
+        roots.push({ rootId: installedMod.id, requirements });
       }
     }
   } else {
