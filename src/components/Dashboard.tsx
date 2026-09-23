@@ -691,6 +691,7 @@ function getDetailItems(
 ) {
   return [
     { label: "Causas de conflito", items: report.conflictDetails ?? [] },
+    { label: "Recomendações", items: report.recommendations },
     {
       label: "Atualizados junto",
       items: report.cascadingUpdates.map((id) => getModDisplayName(id, modsMap)),
@@ -722,6 +723,7 @@ function createFallbackReport(modId: string): ModAnalysisReport {
     requiredNewMods: [],
     cascadingUpdates: [],
     conflictingMods: [],
+    recommendations: [],
   };
 }
 

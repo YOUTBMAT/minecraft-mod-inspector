@@ -4,7 +4,9 @@ import { analyzeModpack } from "@/lib/dependencyResolver";
 import { parseModpackManifest } from "@/lib/modpackParser";
 import {
   FABRIC_BRIDGE_PROJECT_IDS,
+  FABRIC_BRIDGE_PROJECT_SLUGS,
   resolveCurseForgeMods,
+  resolveCurseForgeModsBySlug,
   resolveRecommendedModLoaderVersion,
 } from "@/lib/curseforgeService";
 import { resolveModrinthProjectMeta } from "@/lib/modrinthService";
@@ -77,8 +79,8 @@ export async function POST(request: Request) {
         ),
       );
     const fabricBridgeMods = requiresFabricBridge
-      ? await resolveCurseForgeMods(
-          FABRIC_BRIDGE_PROJECT_IDS.map((id) => ({ id })),
+      ? await resolveCurseForgeModsBySlug(
+          Object.keys(FABRIC_BRIDGE_PROJECT_SLUGS),
           gameVersion,
           loader,
         )
@@ -88,15 +90,12 @@ export async function POST(request: Request) {
       mods: [
         ...enrichedPackInfo.mods,
         ...(fabricBridgeMods
-          ? FABRIC_BRIDGE_PROJECT_IDS.map((id) => {
-              const bridgeMod = fabricBridgeMods.get(id);
-              return {
-                id,
-                fileId: bridgeMod?.latestFileId,
-                name: bridgeMod?.displayName,
-                version: bridgeMod?.latestVersion,
-              };
-            })
+          ? Array.from(fabricBridgeMods.values()).map((bridgeMod) => ({
+              id: bridgeMod.projectId,
+              fileId: bridgeMod.latestFileId,
+              name: bridgeMod.displayName,
+              version: bridgeMod.latestVersion,
+            }))
           : []),
       ].filter(
         (mod, index, mods) => mods.findIndex((candidate) => candidate.id === mod.id) === index,
@@ -129,6 +128,9 @@ export async function POST(request: Request) {
       }
     }
     for (const [id, mod] of curseForgeMods ?? []) {
+      modNames.set(id, mod.displayName);
+    }
+    for (const [id, mod] of fabricBridgeMods ?? []) {
       modNames.set(id, mod.displayName);
     }
     for (const [id, mod] of allModrinthMeta ?? []) {

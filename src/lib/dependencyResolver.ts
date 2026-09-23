@@ -59,15 +59,11 @@ export async function analyzeModpack(
         continue;
       }
 
-      if (!resolvedMod.loaderCompatible && loader.toLowerCase() === "neoforge") {
-        conflictingModIds.add(installedMod.id);
-        report.conflictDetails = [
-          `O mod ${resolvedMod.displayName} usa Fabric em um modpack NeoForge. Instale Sinytra Connector e Forgified Fabric API, ou substitua o mod por uma versão NeoForge.`,
-        ];
-      }
-
       if (loader.toLowerCase() === "neoforge" && resolvedMod.requiresFabricBridge) {
         report.requiredNewMods.push(...FABRIC_BRIDGE_PROJECT_IDS);
+        report.recommendations.push(
+          `${resolvedMod.displayName} parece ser um mod Fabric em NeoForge. Instale Sinytra Connector e Forgified Fabric API; isso é uma recomendação de compatibilidade, não um conflito direto.`,
+        );
       }
 
       if (resolvedMod.updateAvailable) {
@@ -147,6 +143,7 @@ export async function analyzeModpack(
 
   for (const report of reports.values()) {
     report.requiredNewMods = unique(report.requiredNewMods);
+    report.recommendations = unique(report.recommendations);
     report.cascadingUpdates = unique(report.cascadingUpdates);
     report.conflictingMods = unique(report.conflictingMods);
     report.conflictDetails = unique(report.conflictDetails ?? []);
@@ -486,6 +483,7 @@ function createReport(installedMod: InstalledMod): ModAnalysisReport {
     requiredNewMods: [],
     cascadingUpdates: [],
     conflictingMods: [],
+    recommendations: [],
   };
 }
 

@@ -5,6 +5,10 @@ const CURSEFORGE_MINECRAFT_GAME_ID = 432;
 const CURSEFORGE_MOD_CLASS_ID = 6;
 const CURSEFORGE_BATCH_SIZE = 50;
 export const FABRIC_BRIDGE_PROJECT_IDS = ["883520", "882495"] as const;
+export const FABRIC_BRIDGE_PROJECT_SLUGS = {
+  "sinytra-connector": "Sinytra Connector",
+  "forgified-fabric-api": "Forgified Fabric API",
+} as const;
 const CURSEFORGE_LOADER_TYPES: Record<string, number> = {
   forge: 1,
   fabric: 4,
@@ -42,6 +46,8 @@ interface CurseForgeApiMod {
   name?: string;
   latestFiles?: CurseForgeFile[];
   latestFilesIndexes?: CurseForgeFileIndex[];
+  slug?: string;
+  categories?: Array<{ name?: string }>;
 }
 
 interface CurseForgeApiResponse {
@@ -75,6 +81,8 @@ export interface CurseForgeResolvedMod {
   updateAvailable: boolean;
   loaderCompatible: boolean;
   requiresFabricBridge: boolean;
+  supportsFabric: boolean;
+  supportsForge: boolean;
   requiredDependencies: Array<{
     projectId: string;
     fileId?: string;
@@ -117,6 +125,49 @@ export function resolveCurseForgeMods(
   const request = fetchResolvedMods(mods, gameVersion, loader);
   resolvedModsCache.set(cacheKey, request);
   return request;
+}
+
+export async function resolveCurseForgeModsBySlug(
+  slugs: string[],
+  gameVersion: string,
+  loader: string,
+): Promise<Map<string, CurseForgeResolvedMod>> {
+  const apiKey = process.env.CURSEFORGE_API_KEY;
+  if (!apiKey || slugs.length === 0) {
+    return new Map();
+  }
+
+  const projects = await Promise.all(
+    slugs.map((slug) => fetchProjectBySlug(slug, apiKey)),
+  );
+  const resolved = await resolveCurseForgeMods(
+    projects
+      .filter((project): project is CurseForgeApiMod => project !== undefined)
+      .map((project) => ({ id: String(project.id) })),
+    gameVersion,
+    loader,
+  );
+
+  return new Map(
+    projects.flatMap((project) => {
+      if (!project) {
+        return [];
+      }
+
+      const resolvedMod = resolved.get(String(project.id));
+      if (!resolvedMod) {
+        return [];
+      }
+
+      const forcedName = FABRIC_BRIDGE_PROJECT_SLUGS[
+        project.slug as keyof typeof FABRIC_BRIDGE_PROJECT_SLUGS
+      ];
+      return [[String(project.id), {
+        ...resolvedMod,
+        displayName: forcedName ?? resolvedMod.displayName,
+      }] as const];
+    }),
+  );
 }
 
 async function fetchResolvedMods(
@@ -295,7 +346,7 @@ function pickCompatibleFile(
     new Map(fileCandidates.map((file) => [file.id, file])).values(),
   );
   const stableCandidates = uniqueCandidates.filter((file) => file.releaseType === 1);
-  const candidates = stableCandidates;
+  const candidates = stableCandidates.length > 0 ? stableCandidates : uniqueCandidates;
   const latestFile = candidates.sort(compareCurseForgeFiles)[0];
 
   if (!latestFile) {
@@ -325,7 +376,14 @@ function formatResolvedMod(
   const latestFileId = compatible?.fileId ?? installedFileId;
   const installedVersion = formatFile(knownInstalledFile, installedFileId);
   const latestVersion = compatible?.fileName ?? installedVersion;
-  const loaderCompatible = isCompatibleLoader(knownInstalledFile?.modLoader, loader);
+  const supportsFabric = hasProjectLoaderSupport(mod, "fabric") ||
+    hasFileLoaderSupport(knownInstalledFile, "fabric");
+  const supportsForge = hasProjectLoaderSupport(mod, "forge") ||
+    hasFileLoaderSupport(knownInstalledFile, "forge") ||
+    hasFileLoaderSupport(knownInstalledFile, "neoforge");
+  const loaderCompatible = knownInstalledFile === undefined
+    ? supportsLoaderSupport(mod, loader)
+    : isCompatibleFile(knownInstalledFile, gameVersion, loader);
   const dependencyFile = compatible?.fileId
     ? fileDetails.get(Number(compatible.fileId)) ?? mod.latestFiles?.find(
         (file) => String(file.id) === compatible.fileId,
@@ -361,7 +419,9 @@ function formatResolvedMod(
     latestDownloadUrl: compatible?.downloadUrl,
     updateAvailable: latestFileId !== installedFileId,
     loaderCompatible,
-    requiresFabricBridge: !loaderCompatible || requiredDependencies.some(
+    supportsFabric,
+    supportsForge,
+    requiresFabricBridge: (supportsFabric && !supportsForge) || requiredDependencies.some(
       (dependency) => FABRIC_BRIDGE_PROJECT_IDS.includes(
         dependency.projectId as (typeof FABRIC_BRIDGE_PROJECT_IDS)[number],
       ),
@@ -393,6 +453,30 @@ async function fetchRecommendedModLoaderVersion(
         entry.name?.toLowerCase().includes("neoforge"),
     );
     return match?.recommended ?? match?.latest;
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchProjectBySlug(
+  slug: string,
+  apiKey: string,
+): Promise<CurseForgeApiMod | undefined> {
+  try {
+    const url = new URL(CURSEFORGE_SEARCH_URL);
+    url.searchParams.set("gameId", String(CURSEFORGE_MINECRAFT_GAME_ID));
+    url.searchParams.set("classId", String(CURSEFORGE_MOD_CLASS_ID));
+    url.searchParams.set("searchFilter", slug);
+    url.searchParams.set("pageSize", "10");
+    const response = await fetch(url, { headers: { "x-api-key": apiKey } });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const body = (await response.json()) as CurseForgeApiResponse;
+    return (body.data ?? []).find(
+      (project) => project.slug?.toLowerCase() === slug.toLowerCase(),
+    );
   } catch {
     return undefined;
   }
@@ -474,6 +558,8 @@ function createFallbackMod(projectId: string, fileId: string): CurseForgeResolve
     updateAvailable: false,
     loaderCompatible: true,
     requiresFabricBridge: false,
+    supportsFabric: false,
+    supportsForge: true,
     requiredDependencies: [],
   };
 }
@@ -483,6 +569,15 @@ function formatFile(file: CurseForgeFile | undefined, fallbackId: string): strin
 }
 
 function isCompatibleLoader(modLoader: number | undefined, loader: string): boolean {
+  if (modLoader === undefined) {
+    return true;
+  }
+
+  if (loader.toLowerCase() === "neoforge") {
+    return modLoader === CURSEFORGE_LOADER_TYPES.neoforge ||
+      modLoader === CURSEFORGE_LOADER_TYPES.forge;
+  }
+
   return modLoader === getCurseForgeLoaderType(loader);
 }
 
@@ -494,13 +589,29 @@ function isCompatibleFile(
   const gameVersions = file.gameVersions ?? [];
   const normalizedLoader = loader.toLowerCase();
   const hasGameVersion = gameVersions.includes(gameVersion);
-  const hasNeoForgeTag = gameVersions.some(
-    (version) => version.toLowerCase() === "neoforge",
-  );
+  const loaderTags = gameVersions.map((version) => version.toLowerCase());
+  const hasNeoForgeTag = loaderTags.includes("neoforge") || loaderTags.includes("forge");
 
   return hasGameVersion &&
     isCompatibleLoader(file.modLoader, loader) &&
-    (normalizedLoader !== "neoforge" || hasNeoForgeTag);
+    (normalizedLoader !== "neoforge" || hasNeoForgeTag || file.modLoader === CURSEFORGE_LOADER_TYPES.forge);
+}
+
+function hasProjectLoaderSupport(mod: CurseForgeApiMod, loader: string): boolean {
+  return (mod.categories ?? []).some((category) =>
+    category.name?.toLowerCase().includes(loader.toLowerCase()),
+  );
+}
+
+function hasFileLoaderSupport(file: CurseForgeFile | undefined, loader: string): boolean {
+  return file?.gameVersions?.some(
+    (version) => version.toLowerCase() === loader.toLowerCase(),
+  ) ?? false;
+}
+
+function supportsLoaderSupport(mod: CurseForgeApiMod, loader: string): boolean {
+  return hasProjectLoaderSupport(mod, loader) ||
+    (loader.toLowerCase() === "neoforge" && hasProjectLoaderSupport(mod, "forge"));
 }
 
 function getCurseForgeLoaderType(loader: string): number | undefined {
