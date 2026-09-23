@@ -393,12 +393,11 @@ function createReport(installedMod: InstalledMod): ModAnalysisReport {
 function createCurseForgeLatestFile(
   mod: CurseForgeResolvedMod,
 ) {
-  return mod.latestDownloadUrl
-    ? {
-        url: mod.latestDownloadUrl,
-        fileName: mod.latestFileName ?? mod.latestVersion,
-      }
-    : undefined;
+  return {
+    url: mod.latestDownloadUrl ?? "",
+    fileName: mod.latestFileName ?? mod.latestVersion,
+    fileId: mod.latestFileId,
+  };
 }
 
 function formatChain(path: string[]) {

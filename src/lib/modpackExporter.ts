@@ -115,10 +115,14 @@ function collectUpdatedMods(
       report?.status === "SAFE_UPDATE" ||
       report?.status === "CASCADING_REQUIRED";
 
-    return {
-      id: mod.id,
-      version: shouldUpdate ? report.latestVersion : String(mod.fileId ?? "unknown"),
-      fileId: mod.fileId,
+      const fileId = shouldUpdate
+        ? report?.latestFile?.fileId ?? mod.fileId
+        : mod.fileId;
+
+      return {
+        id: mod.id,
+        version: shouldUpdate ? report.latestVersion : String(fileId ?? "unknown"),
+        fileId,
       fileName: report?.latestFile?.fileName,
       downloadUrl: report?.latestFile?.url,
       fileSize: report?.latestFile?.fileSize,
@@ -193,7 +197,7 @@ function createCurseForgeManifest(
 ) {
   const files = mods.flatMap((mod) => {
     const projectID = toPositiveNumericId(mod.id);
-    const fileID = toPositiveNumericId(mod.version, mod.fileId);
+      const fileID = toPositiveNumericId(mod.fileId, mod.version);
 
     if (projectID === undefined || fileID === undefined) {
       return [];

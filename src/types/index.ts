@@ -73,6 +73,7 @@ export interface InstalledMod {
 export interface LatestFileInfo {
   url: string;
   fileName: string;
+  fileId?: string | number;
   fileSize?: number;
   sha1?: string;
   sha512?: string;
