@@ -1,4 +1,34 @@
-import type { KnownConflictWarning, KnownModConflictRule } from "@/types";
+import type {
+  KnownConflictWarning,
+  KnownModConflictRule,
+  UnifiedModpack,
+} from "@/types";
+
+export const MOD_LOADER_OVERRIDES: Array<{
+  aliases: string[];
+  compatibleLoaders: UnifiedModpack["loader"][];
+}> = [
+  {
+    aliases: ["forgified-fabric-api", "ffapi"],
+    compatibleLoaders: ["forge", "neoforge"],
+  },
+  {
+    aliases: ["sinytra-connector"],
+    compatibleLoaders: ["forge", "neoforge"],
+  },
+  {
+    aliases: ["forge-config-api-port"],
+    compatibleLoaders: ["fabric", "quilt", "neoforge"],
+  },
+  {
+    aliases: ["architectury-api"],
+    compatibleLoaders: ["forge", "neoforge", "fabric", "quilt"],
+  },
+  {
+    aliases: ["cloth-config", "cloth-config-api"],
+    compatibleLoaders: ["forge", "neoforge", "fabric", "quilt"],
+  },
+];
 
 /**
  * Curated list of mods that are documented (by the mod authors themselves,
@@ -84,7 +114,11 @@ function matchesAnyAlias(tokens: string[], aliases: string[]): boolean {
   const normalizedAliases = aliases.map(normalizeAlias);
   return tokens.some((token) =>
     normalizedAliases.some(
-      (alias) => token === alias || token.includes(alias) || alias.includes(token),
+      (alias) =>
+        token === alias ||
+        token.startsWith(`${alias}-`) ||
+        token.endsWith(`-${alias}`) ||
+        alias.startsWith(`${token}-`),
     ),
   );
 }
@@ -96,16 +130,20 @@ function matchesAnyAlias(tokens: string[], aliases: string[]): boolean {
  */
 export function detectKnownConflicts(
   installedMods: MatchableMod[],
+  loader?: UnifiedModpack["loader"],
 ): KnownConflictWarning[] {
   const warnings: KnownConflictWarning[] = [];
   const seenPairs = new Set<string>();
 
   for (const rule of KNOWN_MOD_CONFLICTS) {
-    const matchesA = installedMods.filter((mod) =>
-      matchesAnyAlias(buildMatchTokens(mod), rule.modA),
-    );
+    const matchesA = installedMods.filter((mod) => {
+      const tokens = buildMatchTokens(mod);
+      return matchesAnyAlias(tokens, rule.modA) &&
+        isLoaderCompatible(mod, loader);
+    });
     const matchesB = installedMods.filter((mod) =>
-      matchesAnyAlias(buildMatchTokens(mod), rule.modB),
+      matchesAnyAlias(buildMatchTokens(mod), rule.modB) &&
+      isLoaderCompatible(mod, loader),
     );
 
     for (const modA of matchesA) {
@@ -134,4 +172,25 @@ export function detectKnownConflicts(
   }
 
   return warnings;
+}
+
+export function isLoaderCompatible(
+  mod: MatchableMod,
+  loader: UnifiedModpack["loader"] | undefined,
+): boolean {
+  if (!loader) {
+    return true;
+  }
+
+  const override = findLoaderOverride(mod);
+  return !override || override.compatibleLoaders.includes(loader);
+}
+
+function findLoaderOverride(
+  mod: MatchableMod,
+): (typeof MOD_LOADER_OVERRIDES)[number] | undefined {
+  const tokens = buildMatchTokens(mod);
+  return MOD_LOADER_OVERRIDES.find((override) =>
+    override.aliases.some((alias) => tokens.includes(normalizeAlias(alias))),
+  );
 }

@@ -62,6 +62,7 @@ export async function POST(request: Request) {
         name: mod.name,
         slug: modrinthMeta?.get(mod.id)?.slug,
       })),
+      packInfo.loader,
     );
     const reportModIds = Array.from(reports.values()).flatMap((report) => [
       ...report.requiredNewMods,
