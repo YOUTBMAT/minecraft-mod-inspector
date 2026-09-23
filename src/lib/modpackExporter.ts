@@ -197,7 +197,7 @@ function createCurseForgeManifest(
 ) {
   const files = mods.flatMap((mod) => {
     const projectID = toPositiveNumericId(mod.id);
-      const fileID = toPositiveNumericId(mod.fileId, mod.version);
+    const fileID = toPositiveNumericId(mod.fileId);
 
     if (projectID === undefined || fileID === undefined) {
       return [];

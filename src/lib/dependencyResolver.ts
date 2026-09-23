@@ -48,6 +48,7 @@ export async function analyzeModpack(
   const roots: RootGraph[] = [];
   const constraints = new Map<string, ConstraintRecord[]>();
   const modrinthUpdates = new Map<string, ModrinthUpdate>();
+  const conflictingModIds = new Set<string>();
 
   if (source === "curseforge") {
     for (const installedMod of installedMods) {
@@ -59,7 +60,7 @@ export async function analyzeModpack(
       }
 
       if (!resolvedMod.loaderCompatible && loader.toLowerCase() === "neoforge") {
-        report.status = "CONFLICT";
+        conflictingModIds.add(installedMod.id);
         report.conflictDetails = [
           `O mod ${resolvedMod.displayName} usa Fabric em um modpack NeoForge. Instale Sinytra Connector e Forgified Fabric API, ou substitua o mod por uma versão NeoForge.`,
         ];
@@ -102,7 +103,13 @@ export async function analyzeModpack(
         if (update.latestVersionNumber !== installedMod.currentVersion) {
           report.status = "SAFE_UPDATE";
           report.latestVersion = update.latestVersionNumber;
-          addIncompatibleConflicts(report, installedMap, update, reports);
+          addIncompatibleConflicts(
+            report,
+            installedMap,
+            update,
+            reports,
+            conflictingModIds,
+          );
           roots.push({
             rootId: installedMod.id,
             requirements: toModrinthRequirements(
@@ -127,17 +134,23 @@ export async function analyzeModpack(
       gameVersion,
       loader,
       constraints,
+      conflictingModIds,
     );
   }
 
-  applyGlobalConstraintConflicts(constraints, reports, loader);
+  applyGlobalConstraintConflicts(
+    constraints,
+    reports,
+    loader,
+    conflictingModIds,
+  );
 
   for (const report of reports.values()) {
     report.requiredNewMods = unique(report.requiredNewMods);
     report.cascadingUpdates = unique(report.cascadingUpdates);
     report.conflictingMods = unique(report.conflictingMods);
     report.conflictDetails = unique(report.conflictDetails ?? []);
-    report.status = getFinalStatus(report);
+    report.status = getFinalStatus(report, conflictingModIds);
   }
 
   return reports;
@@ -153,6 +166,7 @@ async function traverseRoot(
   gameVersion: string,
   loader: string,
   constraints: Map<string, ConstraintRecord[]>,
+  conflictingModIds: Set<string>,
 ): Promise<void> {
   const queue = [{
     sourceId: root.rootId,
@@ -198,6 +212,7 @@ async function traverseRoot(
           report,
           [...current.path, requirement.targetId],
           reports,
+          conflictingModIds,
         );
         continue;
       }
@@ -295,6 +310,7 @@ function applyGlobalConstraintConflicts(
   constraints: Map<string, ConstraintRecord[]>,
   reports: Map<string, ModAnalysisReport>,
   loader: string,
+  conflictingModIds: Set<string>,
 ) {
   for (const [targetId, records] of constraints) {
     if (shouldIgnoreForgifiedFabricApiConflict(targetId, records, loader)) {
@@ -328,7 +344,13 @@ function applyGlobalConstraintConflicts(
         ...firstGroup.flatMap((record) => [record.sourceId, record.targetId]),
         ...otherGroup.flatMap((record) => [record.sourceId, record.targetId]),
       ]);
-      markDirectConflictReports(reports, involvedIds, targetId, detail);
+      markDirectConflictReports(
+        reports,
+        involvedIds,
+        targetId,
+        detail,
+        conflictingModIds,
+      );
     }
   }
 }
@@ -350,6 +372,7 @@ function markDirectConflictReports(
   involvedIds: Set<string>,
   conflictingId: string,
   detail: string,
+  conflictingModIds: Set<string>,
 ): void {
   for (const involvedId of involvedIds) {
     const report = reports.get(involvedId);
@@ -357,7 +380,7 @@ function markDirectConflictReports(
       continue;
     }
 
-    report.status = "CONFLICT";
+    conflictingModIds.add(involvedId);
     if (conflictingId !== involvedId) {
       report.conflictingMods.push(conflictingId);
     }
@@ -399,6 +422,7 @@ function addCycleConflict(
   report: ModAnalysisReport | undefined,
   cycle: string[],
   reports: Map<string, ModAnalysisReport>,
+  conflictingModIds: Set<string>,
 ) {
   if (!report) {
     return;
@@ -411,7 +435,7 @@ function addCycleConflict(
       continue;
     }
 
-    directReport.status = "CONFLICT";
+    conflictingModIds.add(modId);
     directReport.conflictingMods.push(
       ...cycle.filter((cycleModId) => cycleModId !== modId),
     );
@@ -427,13 +451,14 @@ function addIncompatibleConflicts(
   installedMap: Map<string, string>,
   update: ModrinthUpdate,
   reports: Map<string, ModAnalysisReport>,
+  conflictingModIds: Set<string>,
 ) {
   for (const dependency of update?.dependencies.incompatible ?? []) {
     if (!installedMap.has(dependency.project_id)) {
       continue;
     }
 
-    report.status = "CONFLICT";
+    conflictingModIds.add(report.modId);
     report.conflictingMods.push(dependency.project_id);
     report.conflictDetails = [
       ...(report.conflictDetails ?? []),
@@ -441,7 +466,7 @@ function addIncompatibleConflicts(
     ];
     const dependencyReport = reports.get(dependency.project_id);
     if (dependencyReport) {
-      dependencyReport.status = "CONFLICT";
+      conflictingModIds.add(dependencyReport.modId);
       dependencyReport.conflictingMods.push(report.modId);
       dependencyReport.conflictDetails = [
         ...(dependencyReport.conflictDetails ?? []),
@@ -482,8 +507,11 @@ function unique(values: string[]) {
   return Array.from(new Set(values));
 }
 
-function getFinalStatus(report: ModAnalysisReport): ModStatusType {
-  if (report.conflictDetails && report.conflictDetails.length > 0) {
+function getFinalStatus(
+  report: ModAnalysisReport,
+  conflictingModIds: Set<string>,
+): ModStatusType {
+  if (conflictingModIds.has(report.modId)) {
     return "CONFLICT";
   }
 
