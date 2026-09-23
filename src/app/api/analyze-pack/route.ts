@@ -72,7 +72,8 @@ export async function POST(request: Request) {
 
     const requiresFabricBridge = loader === "neoforge" &&
       Array.from(curseForgeMods?.values() ?? []).some(
-        (mod) => mod.requiresFabricBridge || mod.requiredDependencies.some(
+        (mod) => isContinuityMod(mod.displayName, mod.projectId) ||
+          mod.requiresFabricBridge || mod.requiredDependencies.some(
           (dependency) => FABRIC_BRIDGE_PROJECT_IDS.includes(
             dependency.projectId as (typeof FABRIC_BRIDGE_PROJECT_IDS)[number],
           ),
@@ -177,6 +178,11 @@ export async function POST(request: Request) {
 function maxVersion(...versions: Array<string | undefined>): string {
   return versions.filter((version): version is string => version !== undefined)
     .reduce((current, candidate) => compareVersions(candidate, current) > 0 ? candidate : current);
+}
+
+function isContinuityMod(displayName: string, projectId: string): boolean {
+  return projectId.toLowerCase() === "continuity" ||
+    displayName.toLowerCase().replace(/[\s:_-]+/g, "").includes("continuity");
 }
 
 function compareVersions(left: string, right: string): number {

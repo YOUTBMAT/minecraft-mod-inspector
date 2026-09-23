@@ -80,6 +80,17 @@ export async function analyzeModpack(
       if (requirements.length > 0) {
         roots.push({ rootId: installedMod.id, requirements });
       }
+
+      if (
+        loader.toLowerCase() === "neoforge" &&
+        isContinuityMod(resolvedMod.displayName, resolvedMod.projectId) &&
+        !report.requiredNewMods.includes("883520")
+      ) {
+        report.requiredNewMods.push("883520");
+        report.recommendations.push(
+          "Sinytra Connector será incluído no manifesto para satisfazer a dependência do Continuity.",
+        );
+      }
     }
   } else {
     await Promise.all(
@@ -523,4 +534,9 @@ function getFinalStatus(
   }
 
   return report.status === "UP_TO_DATE" ? "UP_TO_DATE" : "SAFE_UPDATE";
+}
+
+function isContinuityMod(displayName: string, projectId: string): boolean {
+  return projectId.toLowerCase() === "continuity" ||
+    displayName.toLowerCase().replace(/[\s:_-]+/g, "").includes("continuity");
 }
