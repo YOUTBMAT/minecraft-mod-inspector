@@ -17,6 +17,9 @@ interface ExportMod {
   sha512?: string;
 }
 
+const SINYTRA_CONNECTOR_PROJECT_ID = "883520";
+const FALLBACK_SINYTRA_CONNECTOR_FILE_ID = 6688850;
+
 export async function exportUpdatedModpack(
   originalPack: UnifiedModpack,
   reports: Record<string, ModAnalysisReport>,
@@ -177,40 +180,56 @@ async function ensureBridgeDependencies(
     return mods;
   }
 
-  const response = await fetch("/api/resolve-connector", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      gameVersion: pack.gameVersion,
-      loader: pack.loader,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error("Não foi possível resolver um arquivo válido do Sinytra Connector.");
-  }
-
-  const connector = (await response.json()) as {
-    projectID?: number;
-    fileID?: number;
-  };
-  const fileId = toPositiveNumericId(connector.fileID);
-  if (fileId === undefined) {
-    throw new Error("O Sinytra Connector não retornou um fileID válido.");
-  }
+  const fileId = await resolveConnectorFileId(pack);
 
   console.log("[modpackExporter] Incluindo Sinytra Connector no manifest", {
-    projectID: 883520,
+    projectID: Number(SINYTRA_CONNECTOR_PROJECT_ID),
     fileID: fileId,
   });
   return [
     ...mods,
     {
-      id: "883520",
+      id: SINYTRA_CONNECTOR_PROJECT_ID,
       version: String(fileId),
       fileId,
       fileName: "sinytra-connector.jar",
     },
   ];
+}
+
+async function resolveConnectorFileId(pack: UnifiedModpack): Promise<number> {
+  const configuredFallback = toPositiveNumericId(
+    process.env.NEXT_PUBLIC_SINYTRA_CONNECTOR_FILE_ID,
+  );
+
+  try {
+    const response = await fetch("/api/resolve-connector", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameVersion: pack.gameVersion,
+        loader: pack.loader,
+      }),
+    });
+    if (response.ok) {
+      const connector = (await response.json()) as { fileID?: number };
+      const fileId = toPositiveNumericId(connector.fileID);
+      if (fileId !== undefined) {
+        return fileId;
+      }
+    }
+
+    console.warn(
+      `[modpackExporter] /api/resolve-connector retornou ${response.status}; usando fallback do Connector.`,
+    );
+  } catch (error) {
+    console.warn(
+      "[modpackExporter] Falha ao consultar /api/resolve-connector; usando fallback do Connector.",
+      error,
+    );
+  }
+
+  return configuredFallback ?? FALLBACK_SINYTRA_CONNECTOR_FILE_ID;
 }
 
 function needsFabricBridge(
