@@ -12,6 +12,13 @@ interface CurseForgeFile {
   gameVersions?: string[];
   modLoader?: number;
   downloadUrl?: string | null;
+  dependencies?: CurseForgeFileDependency[];
+}
+
+interface CurseForgeFileDependency {
+  modId: number;
+  fileId?: number;
+  relationType: number;
 }
 
 interface CurseForgeFileIndex {
@@ -46,6 +53,10 @@ export interface CurseForgeResolvedMod {
   latestFileName?: string;
   latestDownloadUrl?: string;
   updateAvailable: boolean;
+  requiredDependencies: Array<{
+    projectId: string;
+    fileId?: string;
+  }>;
 }
 
 const resolvedModsCache = new Map<string, Promise<Map<string, CurseForgeResolvedMod>>>();
@@ -84,12 +95,18 @@ async function fetchResolvedMods(
   const apiKey = process.env.CURSEFORGE_API_KEY;
 
   if (!apiKey) {
+    console.log(
+      "[CurseForge] CURSEFORGE_API_KEY não está definida; a análise usará dados de fallback.",
+    );
     return fallback;
   }
 
   const resolved = new Map<string, CurseForgeResolvedMod>();
-  for (let index = 0; index < mods.length; index += CURSEFORGE_BATCH_SIZE) {
-    const batch = mods.slice(index, index + CURSEFORGE_BATCH_SIZE);
+  const pending = [...mods];
+  const queuedIds = new Set(mods.map((mod) => mod.id));
+
+  for (let index = 0; index < pending.length; index += CURSEFORGE_BATCH_SIZE) {
+    const batch = pending.slice(index, index + CURSEFORGE_BATCH_SIZE);
     const apiMods = await fetchBatch(
       batch.map((mod) => Number(mod.id)).filter(Number.isSafeInteger),
       apiKey,
@@ -98,6 +115,17 @@ async function fetchResolvedMods(
       batch.map((mod) => Number(mod.fileId)).filter(Number.isSafeInteger),
       apiKey,
     );
+    const latestFileIds = batch
+      .map((mod) => apiMods.get(Number(mod.id)))
+      .map((mod) => mod && pickCompatibleFile(mod, gameVersion, loader)?.fileId)
+      .filter((fileId): fileId is string => fileId !== undefined)
+      .map(Number)
+      .filter(Number.isSafeInteger)
+      .filter((fileId) => !apiFiles.has(fileId));
+    const latestFiles = await fetchFileBatch(latestFileIds, apiKey);
+    for (const [fileId, file] of latestFiles) {
+      apiFiles.set(fileId, file);
+    }
 
     for (const mod of batch) {
       const apiMod = apiMods.get(Number(mod.id));
@@ -108,12 +136,19 @@ async function fetchResolvedMods(
           ? formatResolvedMod(
               apiMod,
               fileId,
-              apiFiles.get(Number(fileId)),
+              apiFiles,
               gameVersion,
               loader,
             )
           : createFallbackMod(mod.id, fileId),
       );
+
+      for (const dependency of resolved.get(mod.id)?.requiredDependencies ?? []) {
+        if (!queuedIds.has(dependency.projectId)) {
+          queuedIds.add(dependency.projectId);
+          pending.push({ id: dependency.projectId, fileId: dependency.fileId });
+        }
+      }
     }
   }
 
@@ -139,12 +174,19 @@ async function fetchBatch(
     });
 
     if (!response.ok) {
+      console.log(
+        `[CurseForge] POST /v1/mods falhou com HTTP ${response.status}.`,
+      );
       return new Map();
     }
 
     const body = (await response.json()) as CurseForgeApiResponse;
     return new Map((body.data ?? []).map((mod) => [mod.id, mod]));
-  } catch {
+  } catch (error) {
+    console.log(
+      "[CurseForge] Falha ao consultar POST /v1/mods:",
+      error instanceof Error ? error.message : error,
+    );
     return new Map();
   }
 }
@@ -168,12 +210,19 @@ async function fetchFileBatch(
     });
 
     if (!response.ok) {
+      console.log(
+        `[CurseForge] POST /v1/mods/files falhou com HTTP ${response.status}.`,
+      );
       return new Map();
     }
 
     const body = (await response.json()) as CurseForgeFileResponse;
     return new Map((body.data ?? []).map((file) => [file.id, file]));
-  } catch {
+  } catch (error) {
+    console.log(
+      "[CurseForge] Falha ao consultar POST /v1/mods/files:",
+      error instanceof Error ? error.message : error,
+    );
     return new Map();
   }
 }
@@ -215,10 +264,11 @@ function pickCompatibleFile(
 function formatResolvedMod(
   mod: CurseForgeApiMod,
   installedFileId: string,
-  installedFile: CurseForgeFile | undefined,
+  fileDetails: Map<number, CurseForgeFile>,
   gameVersion: string,
   loader: string,
 ): CurseForgeResolvedMod {
+  const installedFile = fileDetails.get(Number(installedFileId));
   const knownInstalledFile = installedFile ?? mod.latestFiles?.find(
     (file) => String(file.id) === installedFileId,
   );
@@ -226,6 +276,19 @@ function formatResolvedMod(
   const latestFileId = compatible?.fileId ?? installedFileId;
   const installedVersion = formatFile(knownInstalledFile, installedFileId);
   const latestVersion = compatible?.fileName ?? installedVersion;
+  const dependencyFile = compatible?.fileId
+    ? fileDetails.get(Number(compatible.fileId)) ?? mod.latestFiles?.find(
+        (file) => String(file.id) === compatible.fileId,
+      )
+    : knownInstalledFile;
+  const requiredDependencies = (dependencyFile?.dependencies ?? [])
+    .filter((dependency) => dependency.relationType === 3)
+    .map((dependency) => ({
+      projectId: String(dependency.modId),
+      fileId: dependency.fileId === undefined
+        ? undefined
+        : String(dependency.fileId),
+    }));
 
   return {
     projectId: String(mod.id),
@@ -237,6 +300,7 @@ function formatResolvedMod(
     latestFileName: compatible?.fileName,
     latestDownloadUrl: compatible?.downloadUrl,
     updateAvailable: latestFileId !== installedFileId,
+    requiredDependencies,
   };
 }
 
@@ -298,6 +362,7 @@ function createFallbackMod(projectId: string, fileId: string): CurseForgeResolve
     latestVersion: `Arquivo ${fileId}`,
     latestFileId: fileId,
     updateAvailable: false,
+    requiredDependencies: [],
   };
 }
 

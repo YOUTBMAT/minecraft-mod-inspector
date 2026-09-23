@@ -41,6 +41,38 @@ export async function analyzeModpack(
             fileName: curseForgeMod.latestFileName ?? curseForgeMod.latestVersion,
           };
         }
+
+        const queue = [...curseForgeMod.requiredDependencies];
+        const visitedDependencies = new Set<string>();
+
+        while (queue.length > 0) {
+          const dependency = queue.shift();
+          if (!dependency || visitedDependencies.has(dependency.projectId)) {
+            continue;
+          }
+
+          visitedDependencies.add(dependency.projectId);
+          const installedDependency = curseForgeMods?.get(dependency.projectId);
+
+          if (!installedMap.has(dependency.projectId)) {
+            report.requiredNewMods.push(dependency.projectId);
+          } else if (
+            dependency.projectId !== installedMod.id &&
+            installedDependency &&
+            (dependency.fileId === undefined ||
+              installedDependency.fileId !== dependency.fileId)
+          ) {
+            report.cascadingUpdates.push(dependency.projectId);
+          }
+
+          for (const nestedDependency of installedDependency?.requiredDependencies ?? []) {
+            queue.push(nestedDependency);
+          }
+        }
+
+        report.requiredNewMods = Array.from(new Set(report.requiredNewMods));
+        report.cascadingUpdates = Array.from(new Set(report.cascadingUpdates));
+        report.status = getFinalStatus(report);
       }
       reports.set(installedMod.id, report);
       continue;
