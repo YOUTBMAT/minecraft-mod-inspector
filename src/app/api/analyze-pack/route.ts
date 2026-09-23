@@ -70,15 +70,18 @@ export async function POST(request: Request) {
       curseForgeMods,
     );
 
+    const packHasContinuity = packInfo.mods.some((mod) =>
+      isContinuityMod(mod.name ?? "", mod.id),
+    );
     const requiresFabricBridge = loader === "neoforge" &&
-      Array.from(curseForgeMods?.values() ?? []).some(
+      (packHasContinuity || Array.from(curseForgeMods?.values() ?? []).some(
         (mod) => isContinuityMod(mod.displayName, mod.projectId) ||
           mod.requiresFabricBridge || mod.requiredDependencies.some(
           (dependency) => FABRIC_BRIDGE_PROJECT_IDS.includes(
             dependency.projectId as (typeof FABRIC_BRIDGE_PROJECT_IDS)[number],
           ),
-        ),
-      );
+          ),
+        ));
     const fabricBridgeMods = requiresFabricBridge
       ? await resolveCurseForgeModsBySlug(
           Object.keys(FABRIC_BRIDGE_PROJECT_SLUGS),
@@ -105,12 +108,21 @@ export async function POST(request: Request) {
             })
           : []),
         ...(fabricBridgeMods
-          ? Array.from(fabricBridgeMods.values()).map((bridgeMod) => ({
-              id: bridgeMod.projectId,
-              fileId: bridgeMod.latestFileId,
-              name: bridgeMod.displayName,
-              version: bridgeMod.latestVersion,
-            }))
+          ? Array.from(fabricBridgeMods.values()).flatMap((bridgeMod) => {
+              if (!isPositiveNumericId(bridgeMod.latestFileId)) {
+                console.warn(
+                  `[analyze-pack] Connector sem fileID válido; projeto ${bridgeMod.projectId} não será exportado.`,
+                );
+                return [];
+              }
+
+              return [{
+                id: bridgeMod.projectId,
+                fileId: Number(bridgeMod.latestFileId),
+                name: bridgeMod.displayName,
+                version: bridgeMod.latestVersion,
+              }];
+            })
           : []),
       ].filter(
         (mod, index, mods) => mods.findIndex((candidate) => candidate.id === mod.id) === index,
@@ -183,6 +195,11 @@ function maxVersion(...versions: Array<string | undefined>): string {
 function isContinuityMod(displayName: string, projectId: string): boolean {
   return projectId.toLowerCase() === "continuity" ||
     displayName.toLowerCase().replace(/[\s:_-]+/g, "").includes("continuity");
+}
+
+function isPositiveNumericId(value: string | number | undefined): boolean {
+  const numericValue = Number(value);
+  return Number.isSafeInteger(numericValue) && numericValue > 0;
 }
 
 function compareVersions(left: string, right: string): number {

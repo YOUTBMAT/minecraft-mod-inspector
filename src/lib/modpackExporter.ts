@@ -16,18 +16,12 @@ interface ExportMod {
   sha512?: string;
 }
 
-const SINYTRA_CONNECTOR_PROJECT_ID = "883520";
-const FALLBACK_SINYTRA_CONNECTOR_FILE_ID = 6688850;
 export async function exportUpdatedModpack(
   originalPack: UnifiedModpack,
   reports: Record<string, ModAnalysisReport>,
 ): Promise<void> {
   try {
-    const mods = await ensureBridgeDependencies(
-      originalPack,
-      collectUpdatedMods(originalPack, reports),
-      reports,
-    );
+    const mods = collectUpdatedMods(originalPack, reports);
     const manifest =
       originalPack.format === "modrinth"
         ? createModrinthManifest(originalPack, mods)
@@ -160,89 +154,6 @@ function collectUpdatedMods(
   }
 
   return mods;
-}
-
-async function ensureBridgeDependencies(
-  pack: UnifiedModpack,
-  mods: ExportMod[],
-  reports: Record<string, ModAnalysisReport>,
-): Promise<ExportMod[]> {
-  if (pack.format !== "curseforge" || !needsFabricBridge(pack, reports)) {
-    return mods;
-  }
-
-  const existingConnector = mods.find(
-    (mod) => mod.id === "883520" && toPositiveNumericId(mod.fileId) !== undefined,
-  );
-  if (existingConnector) {
-    return mods;
-  }
-
-  const fileId = await resolveConnectorFileId(pack);
-
-  console.log("[modpackExporter] Incluindo Sinytra Connector no manifest", {
-    projectID: Number(SINYTRA_CONNECTOR_PROJECT_ID),
-    fileID: fileId,
-  });
-  return [
-    ...mods,
-    {
-      id: SINYTRA_CONNECTOR_PROJECT_ID,
-      version: String(fileId),
-      fileId,
-      fileName: "sinytra-connector.jar",
-    },
-  ];
-}
-
-async function resolveConnectorFileId(pack: UnifiedModpack): Promise<number> {
-  const configuredFallback = toPositiveNumericId(
-    process.env.NEXT_PUBLIC_SINYTRA_CONNECTOR_FILE_ID,
-  );
-
-  try {
-    const query = new URLSearchParams({
-      gameVersion: pack.gameVersion,
-      loader: pack.loader,
-    });
-    const response = await fetch(`/api/resolve-connector?${query.toString()}`);
-    if (response.ok) {
-      const connector = (await response.json()) as { fileID?: number };
-      const fileId = toPositiveNumericId(connector.fileID);
-      if (fileId !== undefined) {
-        return fileId;
-      }
-    }
-
-    console.warn(
-      `[modpackExporter] /api/resolve-connector retornou ${response.status}; usando fallback do Connector.`,
-    );
-  } catch (error) {
-    console.warn(
-      "[modpackExporter] Falha ao consultar /api/resolve-connector; usando fallback do Connector.",
-      error,
-    );
-  }
-
-  return configuredFallback ?? FALLBACK_SINYTRA_CONNECTOR_FILE_ID;
-}
-
-function needsFabricBridge(
-  pack: UnifiedModpack,
-  reports: Record<string, ModAnalysisReport>,
-): boolean {
-  if (pack.loader !== "forge" && pack.loader !== "neoforge") {
-    return false;
-  }
-
-  return pack.mods.some((mod) => {
-    const text = `${mod.id} ${mod.name ?? ""}`.toLowerCase();
-    return text.includes("continuity") || text.includes("fabric");
-  }) || Object.values(reports).some((report) =>
-    report.recommendations.some((recommendation) =>
-      /sinytra connector|mod fabric/i.test(recommendation),
-    ),
-  );
 }
 
 function createModrinthManifest(
