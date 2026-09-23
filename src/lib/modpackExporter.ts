@@ -22,7 +22,11 @@ export async function exportUpdatedModpack(
   reports: Record<string, ModAnalysisReport>,
 ): Promise<void> {
   try {
-    const mods = collectUpdatedMods(originalPack, reports);
+    const mods = await ensureBridgeDependencies(
+      originalPack,
+      collectUpdatedMods(originalPack, reports),
+      reports,
+    );
     const manifest =
       originalPack.format === "modrinth"
         ? createModrinthManifest(originalPack, mods)
@@ -155,6 +159,76 @@ function collectUpdatedMods(
   }
 
   return mods;
+}
+
+async function ensureBridgeDependencies(
+  pack: UnifiedModpack,
+  mods: ExportMod[],
+  reports: Record<string, ModAnalysisReport>,
+): Promise<ExportMod[]> {
+  if (pack.format !== "curseforge" || !needsFabricBridge(pack, reports)) {
+    return mods;
+  }
+
+  const existingConnector = mods.find(
+    (mod) => mod.id === "883520" && toPositiveNumericId(mod.fileId) !== undefined,
+  );
+  if (existingConnector) {
+    return mods;
+  }
+
+  const response = await fetch("/api/resolve-connector", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      gameVersion: pack.gameVersion,
+      loader: pack.loader,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error("Não foi possível resolver um arquivo válido do Sinytra Connector.");
+  }
+
+  const connector = (await response.json()) as {
+    projectID?: number;
+    fileID?: number;
+  };
+  const fileId = toPositiveNumericId(connector.fileID);
+  if (fileId === undefined) {
+    throw new Error("O Sinytra Connector não retornou um fileID válido.");
+  }
+
+  console.log("[modpackExporter] Incluindo Sinytra Connector no manifest", {
+    projectID: 883520,
+    fileID: fileId,
+  });
+  return [
+    ...mods,
+    {
+      id: "883520",
+      version: String(fileId),
+      fileId,
+      fileName: "sinytra-connector.jar",
+    },
+  ];
+}
+
+function needsFabricBridge(
+  pack: UnifiedModpack,
+  reports: Record<string, ModAnalysisReport>,
+): boolean {
+  if (pack.loader !== "forge" && pack.loader !== "neoforge") {
+    return false;
+  }
+
+  return pack.mods.some((mod) => {
+    const text = `${mod.id} ${mod.name ?? ""}`.toLowerCase();
+    return text.includes("continuity") || text.includes("fabric");
+  }) || Object.values(reports).some((report) =>
+    report.recommendations.some((recommendation) =>
+      /sinytra connector|mod fabric/i.test(recommendation),
+    ),
+  );
 }
 
 function createModrinthManifest(

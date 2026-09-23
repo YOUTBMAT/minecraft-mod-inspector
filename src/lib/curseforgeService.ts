@@ -341,7 +341,7 @@ function pickCompatibleFile(
       .map((candidate) => candidate.details as CurseForgeFile),
     ...(mod.latestFiles ?? []),
   ]
-    .filter((file) => isCompatibleFile(file, gameVersion, loader));
+    .filter((file) => isCompatibleProjectFile(file, mod, gameVersion, loader));
   const uniqueCandidates = Array.from(
     new Map(fileCandidates.map((file) => [file.id, file])).values(),
   );
@@ -638,4 +638,17 @@ function supportsLoaderSupport(mod: CurseForgeApiMod, loader: string): boolean {
 
 function getCurseForgeLoaderType(loader: string): number | undefined {
   return CURSEFORGE_LOADER_TYPES[loader.toLowerCase()];
+}
+
+function isCompatibleProjectFile(
+  file: CurseForgeFile,
+  mod: CurseForgeApiMod,
+  gameVersion: string,
+  loader: string,
+): boolean {
+  if (mod.slug?.toLowerCase() === "sinytra-connector") {
+    return (file.gameVersions ?? []).includes(gameVersion);
+  }
+
+  return isCompatibleFile(file, gameVersion, loader);
 }
