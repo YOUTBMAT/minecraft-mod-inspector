@@ -148,7 +148,7 @@ export function detectKnownConflicts(
 
     for (const modA of matchesA) {
       for (const modB of matchesB) {
-        if (modA.id === modB.id) {
+        if (modA.id === modB.id || isForgifiedFabricApiBridgePair(modA, modB, loader)) {
           continue;
         }
 
@@ -172,6 +172,22 @@ export function detectKnownConflicts(
   }
 
   return warnings;
+}
+
+function isForgifiedFabricApiBridgePair(
+  first: MatchableMod,
+  second: MatchableMod,
+  loader: UnifiedModpack["loader"] | undefined,
+): boolean {
+  if (loader !== "forge" && loader !== "neoforge") {
+    return false;
+  }
+
+  const firstTokens = buildMatchTokens(first);
+  const secondTokens = buildMatchTokens(second);
+  const isBridge = (mod: MatchableMod, tokens: string[]) =>
+    mod.id === "882495" || tokens.includes("forgified-fabric-api") || tokens.includes("ffapi");
+  return isBridge(first, firstTokens) || isBridge(second, secondTokens);
 }
 
 export function isLoaderCompatible(

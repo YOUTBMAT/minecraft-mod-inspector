@@ -9,6 +9,8 @@ import {
   type CurseForgeResolvedMod,
 } from "@/lib/curseforgeService";
 
+const FORGIFIED_FABRIC_API_ID = "882495";
+
 type ModrinthUpdate = Awaited<ReturnType<typeof checkModrinthUpdate>>;
 
 interface DependencyRequirement {
@@ -100,7 +102,7 @@ export async function analyzeModpack(
         if (update.latestVersionNumber !== installedMod.currentVersion) {
           report.status = "SAFE_UPDATE";
           report.latestVersion = update.latestVersionNumber;
-          addIncompatibleConflicts(report, installedMap, update);
+          addIncompatibleConflicts(report, installedMap, update, reports);
           roots.push({
             rootId: installedMod.id,
             requirements: toModrinthRequirements(
@@ -128,7 +130,7 @@ export async function analyzeModpack(
     );
   }
 
-  applyGlobalConstraintConflicts(constraints, reports);
+  applyGlobalConstraintConflicts(constraints, reports, loader);
 
   for (const report of reports.values()) {
     report.requiredNewMods = unique(report.requiredNewMods);
@@ -192,7 +194,11 @@ async function traverseRoot(
       }
 
       if (current.path.includes(requirement.targetId)) {
-        addCycleConflict(report, [...current.path, requirement.targetId]);
+        addCycleConflict(
+          report,
+          [...current.path, requirement.targetId],
+          reports,
+        );
         continue;
       }
 
@@ -288,8 +294,13 @@ function toModrinthRequirements(
 function applyGlobalConstraintConflicts(
   constraints: Map<string, ConstraintRecord[]>,
   reports: Map<string, ModAnalysisReport>,
+  loader: string,
 ) {
   for (const [targetId, records] of constraints) {
+    if (shouldIgnoreForgifiedFabricApiConflict(targetId, records, loader)) {
+      continue;
+    }
+
     const grouped = new Map<string, ConstraintRecord[]>();
     for (const record of records) {
       if (!record.constraint) {
@@ -312,17 +323,45 @@ function applyGlobalConstraintConflicts(
       const other = otherGroup[0];
       const detail = `Conflito na cadeia: ${formatChain(first.path)} exige ${targetId} (${first.constraint}), mas ${formatChain(other.path)} exige ${targetId} (${other.constraint}).`;
 
-      for (const record of [...firstGroup, ...otherGroup]) {
-        const report = reports.get(record.rootId);
-        if (!report) {
-          continue;
-        }
-
-        report.status = "CONFLICT";
-        report.conflictingMods.push(targetId);
-        report.conflictDetails = [...(report.conflictDetails ?? []), detail];
-      }
+      const involvedIds = new Set([
+        targetId,
+        ...firstGroup.flatMap((record) => [record.sourceId, record.targetId]),
+        ...otherGroup.flatMap((record) => [record.sourceId, record.targetId]),
+      ]);
+      markDirectConflictReports(reports, involvedIds, targetId, detail);
     }
+  }
+}
+
+function shouldIgnoreForgifiedFabricApiConflict(
+  targetId: string,
+  records: ConstraintRecord[],
+  loader: string,
+): boolean {
+  return (loader.toLowerCase() === "forge" || loader.toLowerCase() === "neoforge") &&
+    (targetId === FORGIFIED_FABRIC_API_ID || records.some(
+      (record) => record.sourceId === FORGIFIED_FABRIC_API_ID ||
+        record.targetId === FORGIFIED_FABRIC_API_ID,
+    ));
+}
+
+function markDirectConflictReports(
+  reports: Map<string, ModAnalysisReport>,
+  involvedIds: Set<string>,
+  conflictingId: string,
+  detail: string,
+): void {
+  for (const involvedId of involvedIds) {
+    const report = reports.get(involvedId);
+    if (!report) {
+      continue;
+    }
+
+    report.status = "CONFLICT";
+    if (conflictingId !== involvedId) {
+      report.conflictingMods.push(conflictingId);
+    }
+    report.conflictDetails = [...(report.conflictDetails ?? []), detail];
   }
 }
 
@@ -359,23 +398,35 @@ function shouldIgnoreIncompatibleCurseForgeDependency(
 function addCycleConflict(
   report: ModAnalysisReport | undefined,
   cycle: string[],
+  reports: Map<string, ModAnalysisReport>,
 ) {
   if (!report) {
     return;
   }
 
-  report.status = "CONFLICT";
-  report.conflictingMods.push(cycle[cycle.length - 1]);
-  report.conflictDetails = [
-    ...(report.conflictDetails ?? []),
-    `Ciclo de dependências detectado: ${formatChain(cycle)}.`,
-  ];
+  const detail = `Ciclo de dependências detectado: ${formatChain(cycle)}.`;
+  for (const modId of new Set(cycle)) {
+    const directReport = reports.get(modId);
+    if (!directReport) {
+      continue;
+    }
+
+    directReport.status = "CONFLICT";
+    directReport.conflictingMods.push(
+      ...cycle.filter((cycleModId) => cycleModId !== modId),
+    );
+    directReport.conflictDetails = [
+      ...(directReport.conflictDetails ?? []),
+      detail,
+    ];
+  }
 }
 
 function addIncompatibleConflicts(
   report: ModAnalysisReport,
   installedMap: Map<string, string>,
   update: ModrinthUpdate,
+  reports: Map<string, ModAnalysisReport>,
 ) {
   for (const dependency of update?.dependencies.incompatible ?? []) {
     if (!installedMap.has(dependency.project_id)) {
@@ -388,6 +439,15 @@ function addIncompatibleConflicts(
       ...(report.conflictDetails ?? []),
       `Conflito na cadeia: [${report.modId}] é incompatível com [${dependency.project_id}].`,
     ];
+    const dependencyReport = reports.get(dependency.project_id);
+    if (dependencyReport) {
+      dependencyReport.status = "CONFLICT";
+      dependencyReport.conflictingMods.push(report.modId);
+      dependencyReport.conflictDetails = [
+        ...(dependencyReport.conflictDetails ?? []),
+        `Conflito na cadeia: [${report.modId}] é incompatível com [${dependency.project_id}].`,
+      ];
+    }
   }
 }
 
