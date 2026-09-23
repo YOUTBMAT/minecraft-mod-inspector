@@ -152,6 +152,16 @@ async function traverseRoot(
     }
 
     for (const requirement of current.requirements) {
+      if (
+        source === "curseforge" &&
+        shouldIgnoreIncompatibleCurseForgeDependency(
+          requirement,
+          curseForgeMods,
+        )
+      ) {
+        continue;
+      }
+
       const records = constraints.get(requirement.targetId) ?? [];
       records.push({ ...requirement, sourceId: current.sourceId });
       constraints.set(requirement.targetId, records);
@@ -322,6 +332,14 @@ function requiresCascade(
 
   const installedVersion = installedMap.get(requirement.targetId);
   return installedVersion !== "unknown" && installedVersion !== requirement.constraint;
+}
+
+function shouldIgnoreIncompatibleCurseForgeDependency(
+  requirement: DependencyRequirement,
+  curseForgeMods: Map<string, CurseForgeResolvedMod> | undefined,
+): boolean {
+  const dependency = curseForgeMods?.get(requirement.targetId);
+  return dependency !== undefined && !dependency.loaderCompatible;
 }
 
 function addCycleConflict(
