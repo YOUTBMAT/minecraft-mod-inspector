@@ -309,15 +309,22 @@ export function Dashboard({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
+        <div className="max-w-full overflow-hidden">
+          <table className="w-full table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-[38%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[20%]" />
+              <col className="w-[6%]" />
+            </colgroup>
             <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-5 py-3 font-semibold">Mod</th>
-                <th className="px-5 py-3 font-semibold">Versão instalada</th>
-                <th className="px-5 py-3 font-semibold">Versão mais recente</th>
-                <th className="px-5 py-3 font-semibold">Status</th>
-                <th className="px-5 py-3"><span className="sr-only">Detalhes</span></th>
+                <th className="px-2 py-3 font-semibold sm:px-3">Mod</th>
+                <th className="px-2 py-3 font-semibold leading-tight sm:px-3">Versão instalada</th>
+                <th className="px-2 py-3 font-semibold leading-tight sm:px-3">Versão mais recente</th>
+                <th className="px-2 py-3 font-semibold sm:px-3">Status</th>
+                <th className="px-2 py-3 sm:px-3"><span className="sr-only">Detalhes</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -338,7 +345,7 @@ export function Dashboard({
               })}
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td className="px-5 py-12 text-center text-slate-500" colSpan={5}>
+                  <td className="px-2 py-12 text-center text-slate-500 sm:px-3" colSpan={5}>
                     Nenhum mod corresponde aos filtros atuais.
                   </td>
                 </tr>
@@ -372,14 +379,14 @@ function ModTableRows({
         className={`transition-colors ${canExpand ? "cursor-pointer hover:bg-slate-50" : ""}`}
         onClick={canExpand ? onToggle : undefined}
       >
-        <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-900">
-          <span>{report.modName ?? report.modId}</span>
-          {report.modName ? <span className="ml-2 text-xs font-normal text-slate-400">#{report.modId}</span> : null}
+        <td className="min-w-0 px-2 py-4 font-semibold text-slate-900 sm:px-3">
+          <span className="block truncate" title={report.modName ?? report.modId}>{report.modName ?? report.modId}</span>
+          {report.modName ? <span className="block truncate text-xs font-normal text-slate-400" title={`#${report.modId}`}>#{report.modId}</span> : null}
         </td>
-        <td className="whitespace-nowrap px-5 py-4 text-slate-600">{installedVersion}</td>
-        <td className="whitespace-nowrap px-5 py-4 text-slate-600">{report.latestVersion}</td>
-        <td className="px-5 py-4"><StatusBadge status={report.status} /></td>
-        <td className="px-5 py-4 text-right">
+        <td className="min-w-0 px-2 py-4 text-xs text-slate-600 sm:px-3"><span className="block truncate" title={installedVersion}>{installedVersion}</span></td>
+        <td className="min-w-0 px-2 py-4 text-xs text-slate-600 sm:px-3"><span className="block truncate" title={report.latestVersion}>{report.latestVersion}</span></td>
+        <td className="min-w-0 whitespace-nowrap px-2 py-4 sm:px-3"><StatusBadge status={report.status} /></td>
+        <td className="px-2 py-4 text-right sm:px-3">
           {canExpand ? (
             <button
               aria-expanded={isExpanded}
@@ -398,7 +405,7 @@ function ModTableRows({
       </tr>
       {canExpand && isExpanded ? (
         <tr className="bg-slate-50/70">
-          <td className="px-5 pb-5 pt-1" colSpan={5}>
+          <td className="px-2 pb-5 pt-1 sm:px-3" colSpan={5}>
             <div className="rounded-lg border border-slate-200 bg-white p-4 transition-all">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Detalhes da análise</p>
               <div className="mt-3 grid gap-4 sm:grid-cols-3">
@@ -653,7 +660,10 @@ function SummaryCard({
 
 function StatusBadge({ status }: { status: ModStatusType }) {
   return (
-    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${statusStyles[status]}`}>
+    <span
+      className={`inline-flex max-w-full truncate rounded-full px-1.5 py-1 text-xs font-semibold ring-1 ring-inset sm:px-3 ${statusStyles[status]}`}
+      title={statusLabels[status]}
+    >
       {statusLabels[status]}
     </span>
   );
