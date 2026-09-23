@@ -15,11 +15,38 @@ export async function POST(request: Request) {
       );
     }
 
-    const resolved = await resolveCurseForgeModsBySlug(
-      ["sinytra-connector"],
-      body.gameVersion,
-      body.loader,
+    return resolveConnector(body.gameVersion, body.loader);
+  } catch (error) {
+    console.error("[resolve-connector] Falha ao resolver Sinytra Connector", error);
+    return NextResponse.json(
+      { error: "Não foi possível resolver o Sinytra Connector." },
+      { status: 500 },
     );
+  }
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const gameVersion = url.searchParams.get("gameVersion") ?? "1.21.1";
+  const loader = url.searchParams.get("loader") ?? "neoforge";
+
+  try {
+    return resolveConnector(gameVersion, loader);
+  } catch (error) {
+    console.error("[resolve-connector] Falha ao resolver Sinytra Connector", error);
+    return NextResponse.json(
+      { error: "Não foi possível resolver o Sinytra Connector." },
+      { status: 500 },
+    );
+  }
+}
+
+async function resolveConnector(gameVersion: string, loader: string) {
+  const resolved = await resolveCurseForgeModsBySlug(
+    ["sinytra-connector"],
+    gameVersion,
+    loader,
+  );
     const connector = Array.from(resolved.values()).find(
       (mod) => Number.isSafeInteger(Number(mod.latestFileId)) && Number(mod.latestFileId) > 0,
     );
@@ -37,11 +64,4 @@ export async function POST(request: Request) {
       required: true,
       name: "Sinytra Connector",
     });
-  } catch (error) {
-    console.error("[resolve-connector] Falha ao resolver Sinytra Connector", error);
-    return NextResponse.json(
-      { error: "Não foi possível resolver o Sinytra Connector." },
-      { status: 500 },
-    );
-  }
 }

@@ -5,7 +5,6 @@ import type {
   PortTargetFormat,
   UnifiedModpack,
 } from "@/types";
-
 interface ExportMod {
   id: string;
   version: string;
@@ -19,7 +18,6 @@ interface ExportMod {
 
 const SINYTRA_CONNECTOR_PROJECT_ID = "883520";
 const FALLBACK_SINYTRA_CONNECTOR_FILE_ID = 6688850;
-
 export async function exportUpdatedModpack(
   originalPack: UnifiedModpack,
   reports: Record<string, ModAnalysisReport>,
@@ -203,14 +201,11 @@ async function resolveConnectorFileId(pack: UnifiedModpack): Promise<number> {
   );
 
   try {
-    const response = await fetch("/api/resolve-connector", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        gameVersion: pack.gameVersion,
-        loader: pack.loader,
-      }),
+    const query = new URLSearchParams({
+      gameVersion: pack.gameVersion,
+      loader: pack.loader,
     });
+    const response = await fetch(`/api/resolve-connector?${query.toString()}`);
     if (response.ok) {
       const connector = (await response.json()) as { fileID?: number };
       const fileId = toPositiveNumericId(connector.fileID);
@@ -302,9 +297,9 @@ function createCurseForgeManifest(
   return {
     manifestType: "minecraftModpack",
     manifestVersion: 1,
-    overrides: "overrides",
     name: originalPack.name,
-    version: "updated",
+    version: "1.0.0",
+    author: "User",
     minecraft: {
       version: originalPack.gameVersion,
       modLoaders: [
@@ -318,6 +313,7 @@ function createCurseForgeManifest(
       ],
     },
     files,
+    overrides: "overrides",
   };
 }
 
