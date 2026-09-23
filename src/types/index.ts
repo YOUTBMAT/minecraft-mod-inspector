@@ -28,6 +28,11 @@ export interface ModrinthIndex {
   files: Array<{
     path: string;
     downloads: string[];
+    fileSize?: number;
+    hashes?: {
+      sha1?: string;
+      sha512?: string;
+    };
   }>;
 }
 
@@ -65,6 +70,14 @@ export interface InstalledMod {
   name?: string;
 }
 
+export interface LatestFileInfo {
+  url: string;
+  fileName: string;
+  fileSize?: number;
+  sha1?: string;
+  sha512?: string;
+}
+
 export interface ModAnalysisReport {
   modId: string;
   modName?: string;
@@ -74,12 +87,17 @@ export interface ModAnalysisReport {
   requiredNewMods: string[];
   cascadingUpdates: string[];
   conflictingMods: string[];
+  latestFile?: LatestFileInfo;
 }
 
 export type CrashType =
   | "JAVA_VERSION_MISMATCH"
   | "MISSING_DEPENDENCY"
   | "MIXIN_CONFLICT"
+  | "OUT_OF_MEMORY"
+  | "DUPLICATE_MOD_ID"
+  | "INCOMPATIBLE_MODS"
+  | "CORRUPTED_MOD_FILE"
   | "UNKNOWN";
 
 export interface CrashAnalysisResult {
@@ -88,4 +106,56 @@ export interface CrashAnalysisResult {
   suspectedMod?: string;
   details: string;
   recommendation: string;
+}
+
+export type ConflictSeverity = "warning" | "critical";
+
+export interface KnownModConflictRule {
+  id: string;
+  modA: string[];
+  modB: string[];
+  severity: ConflictSeverity;
+  reason: string;
+}
+
+export interface KnownConflictWarning {
+  ruleId: string;
+  modAId: string;
+  modAName?: string;
+  modBId: string;
+  modBName?: string;
+  severity: ConflictSeverity;
+  reason: string;
+}
+
+/**
+ * Cross-platform "port" feature: converts a modpack from one platform's
+ * format to the other. There is no official ID mapping between Modrinth
+ * and CurseForge, so matches are found by searching the target platform
+ * by mod name and are inherently best-effort — always require human
+ * confirmation before export, never auto-apply a match silently.
+ */
+export type PortTargetFormat = "curseforge" | "modrinth";
+
+export type PortMatchConfidence = "high" | "medium" | "low";
+
+export interface PortCandidate {
+  targetId: string;
+  targetName: string;
+  confidence: PortMatchConfidence;
+  fileId?: string;
+  fileName: string;
+  downloadUrl?: string;
+  fileSize?: number;
+  sha1?: string;
+  sha512?: string;
+}
+
+export type PortMatchStatus = "matched" | "ambiguous" | "unmatched";
+
+export interface PortMatch {
+  sourceModId: string;
+  sourceModName?: string;
+  status: PortMatchStatus;
+  candidates: PortCandidate[];
 }

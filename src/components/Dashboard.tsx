@@ -3,14 +3,20 @@
 import { useState } from "react";
 import type {
   CrashAnalysisResult,
+  KnownConflictWarning,
   ModAnalysisReport,
   ModStatusType,
+  PortCandidate,
+  PortMatch,
+  PortTargetFormat,
   UnifiedModpack,
 } from "@/types";
+import { exportPortedModpack } from "@/lib/modpackExporter";
 
 interface DashboardProps {
   packInfo?: UnifiedModpack;
   reports?: Record<string, ModAnalysisReport>;
+  conflicts?: KnownConflictWarning[];
   crashReport?: CrashAnalysisResult;
   onReset: () => void;
   onExport?: () => void;
@@ -37,6 +43,7 @@ const statusStyles: Record<ModStatusType, string> = {
 export function Dashboard({
   packInfo,
   reports = {},
+  conflicts = [],
   crashReport,
   onReset,
   onExport,
@@ -44,6 +51,99 @@ export function Dashboard({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [expandedModId, setExpandedModId] = useState<string | null>(null);
+  const [portTargetFormat, setPortTargetFormat] = useState<PortTargetFormat | null>(null);
+  const [portMatches, setPortMatches] = useState<PortMatch[] | null>(null);
+  const [portLoading, setPortLoading] = useState(false);
+  const [portError, setPortError] = useState<string | null>(null);
+  const [portRequiresApiKey, setPortRequiresApiKey] = useState(false);
+  const [portSelections, setPortSelections] = useState<Record<string, number | "exclude">>({});
+
+  const handlePortStart = async (targetFormat: PortTargetFormat) => {
+    if (!packInfo) {
+      return;
+    }
+
+    setPortTargetFormat(targetFormat);
+    setPortLoading(true);
+    setPortError(null);
+    setPortMatches(null);
+    setPortRequiresApiKey(false);
+
+    try {
+      const response = await fetch("/api/port-modpack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mods: packInfo.mods.map((mod) => ({ id: mod.id, name: mod.name })),
+          gameVersion: packInfo.gameVersion,
+          loader: packInfo.loader,
+          targetFormat,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Não foi possível portar o modpack.");
+      }
+
+      const matches: PortMatch[] = data.matches;
+      setPortMatches(matches);
+      setPortRequiresApiKey(Boolean(data.requiresCurseForgeApiKey));
+      setPortSelections(
+        Object.fromEntries(
+          matches.map((match) => [
+            match.sourceModId,
+            match.status === "matched" ? 0 : "exclude",
+          ]),
+        ),
+      );
+    } catch (error) {
+      setPortError(
+        error instanceof Error ? error.message : "Não foi possível portar o modpack.",
+      );
+    } finally {
+      setPortLoading(false);
+    }
+  };
+
+  const handlePortCancel = () => {
+    setPortMatches(null);
+    setPortTargetFormat(null);
+    setPortError(null);
+    setPortRequiresApiKey(false);
+    setPortSelections({});
+  };
+
+  const handlePortConfirm = () => {
+    if (!packInfo || !portTargetFormat || !portMatches) {
+      return;
+    }
+
+    const confirmedCandidates: PortCandidate[] = portMatches
+      .map((match) => {
+        const selection = portSelections[match.sourceModId];
+        if (selection === "exclude" || selection === undefined) {
+          return null;
+        }
+        return match.candidates[selection] ?? null;
+      })
+      .filter((candidate): candidate is PortCandidate => candidate !== null);
+
+    void exportPortedModpack(
+      {
+        name: packInfo.name,
+        gameVersion: packInfo.gameVersion,
+        loader: packInfo.loader,
+        loaderVersion: packInfo.loaderVersion,
+      },
+      portTargetFormat,
+      confirmedCandidates,
+    ).catch((error) => {
+      setPortError(
+        error instanceof Error ? error.message : "Não foi possível exportar o pack portado.",
+      );
+    });
+  };
 
   const rows = packInfo
     ? packInfo.mods.map((mod) => ({
@@ -70,7 +170,7 @@ export function Dashboard({
   const safeUpdates = reportValues.filter(
     (report) => report.status === "SAFE_UPDATE",
   ).length;
-  const conflicts = reportValues.filter(
+  const conflictCount = reportValues.filter(
     (report) => report.status === "CONFLICT",
   ).length;
   const cascadingUpdates = reportValues.filter(
@@ -118,18 +218,59 @@ export function Dashboard({
             >
               Exportar Pack Atualizado
             </button>
+            {packInfo ? (
+              <button
+                className="rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                type="button"
+                onClick={() =>
+                  handlePortStart(packInfo.format === "modrinth" ? "curseforge" : "modrinth")
+                }
+                disabled={portLoading}
+              >
+                {portLoading
+                  ? "A procurar correspondências..."
+                  : `Portar para ${packInfo.format === "modrinth" ? "CurseForge" : "Modrinth"}`}
+              </button>
+            ) : null}
           </div>
         </div>
 
         <div className="mt-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <SummaryCard label="Total de mods" value={totalMods} />
           <SummaryCard label="Podem atualizar" value={safeUpdates} tone="green" />
-          <SummaryCard label="Conflitos" value={conflicts} tone="red" />
+          <SummaryCard label="Conflitos" value={conflictCount} tone="red" />
           <SummaryCard label="Exigem cascata" value={cascadingUpdates} tone="blue" />
         </div>
       </header>
 
       {crashReport ? <CrashReportCard report={crashReport} /> : null}
+
+      {conflicts.length > 0 ? <KnownConflictsCard conflicts={conflicts} /> : null}
+
+      {portError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {portError}
+        </div>
+      ) : null}
+
+      {portRequiresApiKey ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Portar para CurseForge requer a variável de ambiente <code>CURSEFORGE_API_KEY</code> configurada no servidor.
+        </div>
+      ) : null}
+
+      {portMatches && portTargetFormat ? (
+        <PortReviewPanel
+          matches={portMatches}
+          targetFormat={portTargetFormat}
+          selections={portSelections}
+          onSelectionChange={(sourceModId, value) =>
+            setPortSelections((previous) => ({ ...previous, [sourceModId]: value }))
+          }
+          onCancel={handlePortCancel}
+          onConfirm={handlePortConfirm}
+        />
+      ) : null}
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -315,6 +456,172 @@ function CrashReportCard({ report }: { report: CrashAnalysisResult }) {
             </div>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function KnownConflictsCard({ conflicts }: { conflicts: KnownConflictWarning[] }) {
+  return (
+    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950 shadow-sm">
+      <div className="flex gap-4">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/70">
+          <AlertIcon />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-bold">Possíveis conflitos entre mods</h2>
+          <p className="mt-1 text-sm opacity-80">
+            Combinações de mods conhecidas por causar problemas, com base numa lista selecionada (não exaustiva).
+          </p>
+          <ul className="mt-4 space-y-3">
+            {conflicts.map((conflict) => (
+              <li
+                key={`${conflict.ruleId}-${conflict.modAId}-${conflict.modBId}`}
+                className="rounded-lg bg-white/70 p-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold">
+                    {conflict.modAName ?? conflict.modAId}
+                  </span>
+                  <span className="text-amber-700">×</span>
+                  <span className="font-semibold">
+                    {conflict.modBName ?? conflict.modBId}
+                  </span>
+                  <span
+                    className={`ml-2 rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide ${
+                      conflict.severity === "critical"
+                        ? "bg-red-100 text-red-800"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {conflict.severity === "critical" ? "Crítico" : "Aviso"}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm">{conflict.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const portStatusLabels: Record<PortMatch["status"], string> = {
+  matched: "Correspondência encontrada",
+  ambiguous: "Múltiplas opções — escolha uma",
+  unmatched: "Nenhuma correspondência",
+};
+
+const portStatusStyles: Record<PortMatch["status"], string> = {
+  matched: "bg-emerald-100 text-emerald-800",
+  ambiguous: "bg-amber-100 text-amber-800",
+  unmatched: "bg-slate-200 text-slate-700",
+};
+
+const portConfidenceLabels: Record<PortCandidate["confidence"], string> = {
+  high: "Alta confiança",
+  medium: "Confiança média",
+  low: "Baixa confiança — verifique",
+};
+
+function PortReviewPanel({
+  matches,
+  targetFormat,
+  selections,
+  onSelectionChange,
+  onCancel,
+  onConfirm,
+}: {
+  matches: PortMatch[];
+  targetFormat: PortTargetFormat;
+  selections: Record<string, number | "exclude">;
+  onSelectionChange: (sourceModId: string, value: number | "exclude") => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const includedCount = Object.values(selections).filter((value) => value !== "exclude").length;
+
+  return (
+    <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-bold text-indigo-950">
+            Rever portagem para {targetFormat === "curseforge" ? "CurseForge" : "Modrinth"}
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm text-indigo-900/80">
+            As correspondências são encontradas por pesquisa de nome — não existe um mapeamento
+            oficial de IDs entre CurseForge e Modrinth. Confirme ou corrija cada mod antes de
+            exportar; nada é incluído automaticamente sem confiança alta.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            className="rounded-lg border border-indigo-300 px-4 py-2 text-sm font-semibold text-indigo-800 hover:bg-indigo-100"
+            type="button"
+            onClick={onCancel}
+          >
+            Cancelar
+          </button>
+          <button
+            className="rounded-lg bg-indigo-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            onClick={onConfirm}
+            disabled={includedCount === 0}
+          >
+            Confirmar e exportar ({includedCount})
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-5 overflow-hidden rounded-xl border border-indigo-200 bg-white">
+        <table className="min-w-full text-left text-sm">
+          <thead className="border-b border-indigo-100 bg-indigo-50/60 text-xs uppercase tracking-wide text-indigo-900">
+            <tr>
+              <th className="px-4 py-3 font-semibold">Mod original</th>
+              <th className="px-4 py-3 font-semibold">Correspondência escolhida</th>
+              <th className="px-4 py-3 font-semibold">Estado</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {matches.map((match) => {
+              const selection = selections[match.sourceModId] ?? "exclude";
+              return (
+                <tr key={match.sourceModId}>
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                    {match.sourceModName ?? match.sourceModId}
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      className="w-full max-w-sm rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100"
+                      value={selection}
+                      onChange={(event) =>
+                        onSelectionChange(
+                          match.sourceModId,
+                          event.target.value === "exclude" ? "exclude" : Number(event.target.value),
+                        )
+                      }
+                    >
+                      <option value="exclude">Não incluir</option>
+                      {match.candidates.map((candidate, index) => (
+                        <option key={candidate.targetId} value={index}>
+                          {candidate.targetName} — {portConfidenceLabels[candidate.confidence]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${portStatusStyles[match.status]}`}
+                    >
+                      {portStatusLabels[match.status]}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </section>
   );

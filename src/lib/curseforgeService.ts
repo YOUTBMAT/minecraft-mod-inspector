@@ -1,4 +1,7 @@
 const CURSEFORGE_API_URL = "https://api.curseforge.com/v1/mods";
+const CURSEFORGE_SEARCH_URL = "https://api.curseforge.com/v1/mods/search";
+const CURSEFORGE_MINECRAFT_GAME_ID = 432;
+const CURSEFORGE_MOD_CLASS_ID = 6;
 const CURSEFORGE_BATCH_SIZE = 50;
 
 interface CurseForgeFile {
@@ -8,6 +11,7 @@ interface CurseForgeFile {
   fileDate?: string;
   gameVersions?: string[];
   modLoader?: number;
+  downloadUrl?: string | null;
 }
 
 interface CurseForgeFileIndex {
@@ -39,6 +43,8 @@ export interface CurseForgeResolvedMod {
   installedVersion: string;
   latestVersion: string;
   latestFileId: string;
+  latestFileName?: string;
+  latestDownloadUrl?: string;
   updateAvailable: boolean;
 }
 
@@ -172,16 +178,11 @@ async function fetchFileBatch(
   }
 }
 
-function formatResolvedMod(
+function pickCompatibleFile(
   mod: CurseForgeApiMod,
-  installedFileId: string,
-  installedFile: CurseForgeFile | undefined,
   gameVersion: string,
   loader: string,
-): CurseForgeResolvedMod {
-  const knownInstalledFile = installedFile ?? mod.latestFiles?.find(
-    (file) => String(file.id) === installedFileId,
-  );
+): { fileId: string; fileName: string; downloadUrl?: string } | undefined {
   const compatibleFiles = (mod.latestFilesIndexes ?? [])
     .filter((file) => file.gameVersion === gameVersion)
     .filter((file) => isCompatibleLoader(file.modLoader, loader));
@@ -198,9 +199,33 @@ function formatResolvedMod(
   const latestFile = mod.latestFiles?.find(
     (file) => file.id === latestFileIndex?.fileId,
   ) ?? mod.latestFiles?.find((file) => file.gameVersions?.includes(gameVersion));
-  const latestFileId = String(latestFileIndex?.fileId ?? latestFile?.id ?? installedFileId);
+
+  if (!latestFileIndex && !latestFile) {
+    return undefined;
+  }
+
+  const fileId = String(latestFileIndex?.fileId ?? latestFile?.id);
+  return {
+    fileId,
+    fileName: latestFileIndex?.filename ?? formatFile(latestFile, fileId),
+    downloadUrl: latestFile?.downloadUrl ?? undefined,
+  };
+}
+
+function formatResolvedMod(
+  mod: CurseForgeApiMod,
+  installedFileId: string,
+  installedFile: CurseForgeFile | undefined,
+  gameVersion: string,
+  loader: string,
+): CurseForgeResolvedMod {
+  const knownInstalledFile = installedFile ?? mod.latestFiles?.find(
+    (file) => String(file.id) === installedFileId,
+  );
+  const compatible = pickCompatibleFile(mod, gameVersion, loader);
+  const latestFileId = compatible?.fileId ?? installedFileId;
   const installedVersion = formatFile(knownInstalledFile, installedFileId);
-  const latestVersion = latestFileIndex?.filename ?? formatFile(latestFile, latestFileId);
+  const latestVersion = compatible?.fileName ?? installedVersion;
 
   return {
     projectId: String(mod.id),
@@ -209,8 +234,59 @@ function formatResolvedMod(
     installedVersion,
     latestVersion,
     latestFileId,
+    latestFileName: compatible?.fileName,
+    latestDownloadUrl: compatible?.downloadUrl,
     updateAvailable: latestFileId !== installedFileId,
   };
+}
+
+export interface CurseForgeSearchCandidate {
+  id: string;
+  name: string;
+  fileId?: string;
+  fileName?: string;
+}
+
+/**
+ * Searches CurseForge's public mod index by name. Used for best-effort
+ * cross-platform matching (e.g. finding a Modrinth mod's CurseForge
+ * counterpart) — there is no official ID crosswalk between the two
+ * platforms, so this is a heuristic, not a guaranteed match.
+ */
+export async function searchCurseForgeMods(
+  query: string,
+  gameVersion: string,
+  loader: string,
+  apiKey: string,
+): Promise<CurseForgeSearchCandidate[]> {
+  try {
+    const url = new URL(CURSEFORGE_SEARCH_URL);
+    url.searchParams.set("gameId", String(CURSEFORGE_MINECRAFT_GAME_ID));
+    url.searchParams.set("classId", String(CURSEFORGE_MOD_CLASS_ID));
+    url.searchParams.set("searchFilter", query);
+    url.searchParams.set("pageSize", "5");
+
+    const response = await fetch(url, {
+      headers: { "x-api-key": apiKey },
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const body = (await response.json()) as CurseForgeApiResponse;
+    return (body.data ?? []).map((mod) => {
+      const compatible = pickCompatibleFile(mod, gameVersion, loader);
+      return {
+        id: String(mod.id),
+        name: mod.name ?? `Mod ${mod.id}`,
+        fileId: compatible?.fileId,
+        fileName: compatible?.fileName,
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 function createFallbackMod(projectId: string, fileId: string): CurseForgeResolvedMod {

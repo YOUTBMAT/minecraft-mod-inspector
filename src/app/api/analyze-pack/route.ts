@@ -3,6 +3,8 @@ import type { InstalledMod } from "@/types";
 import { analyzeModpack } from "@/lib/dependencyResolver";
 import { parseModpackFile } from "@/lib/modpackParser";
 import { resolveCurseForgeMods } from "@/lib/curseforgeService";
+import { resolveModrinthProjectMeta } from "@/lib/modrinthService";
+import { detectKnownConflicts } from "@/lib/modConflicts";
 
 export async function POST(request: Request) {
   try {
@@ -22,6 +24,9 @@ export async function POST(request: Request) {
     const curseForgeMods = packInfo.format === "curseforge"
       ? await resolveCurseForgeMods(packInfo.mods, gameVersion, loader)
       : undefined;
+    const modrinthMeta = packInfo.format === "modrinth"
+      ? await resolveModrinthProjectMeta(packInfo.mods.map((mod) => mod.id))
+      : undefined;
     const enrichedPackInfo = {
       ...packInfo,
       mods: packInfo.mods.map((mod) => ({
@@ -32,13 +37,16 @@ export async function POST(request: Request) {
               version: curseForgeMods.get(mod.id)?.installedVersion,
             }
           : {}),
+        ...(modrinthMeta
+          ? { name: modrinthMeta.get(mod.id)?.title }
+          : {}),
       })),
     };
     const installedMods: InstalledMod[] = packInfo.mods.map((mod) => ({
       id: mod.id,
       currentVersion: curseForgeMods?.get(mod.id)?.installedVersion
         ?? (mod.fileId === undefined ? "unknown" : String(mod.fileId)),
-      name: curseForgeMods?.get(mod.id)?.displayName,
+      name: curseForgeMods?.get(mod.id)?.displayName ?? modrinthMeta?.get(mod.id)?.title,
     }));
 
     const reports = await analyzeModpack(
@@ -49,10 +57,19 @@ export async function POST(request: Request) {
       curseForgeMods,
     );
 
+    const conflicts = detectKnownConflicts(
+      installedMods.map((mod) => ({
+        id: mod.id,
+        name: mod.name,
+        slug: modrinthMeta?.get(mod.id)?.slug,
+      })),
+    );
+
     return NextResponse.json(
       {
         packInfo: enrichedPackInfo,
         reports: Object.fromEntries(reports),
+        conflicts,
       },
       { status: 200 },
     );

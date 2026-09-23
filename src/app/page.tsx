@@ -6,6 +6,7 @@ import { FileUploader } from "@/components/FileUploader";
 import { exportUpdatedModpack } from "@/lib/modpackExporter";
 import type {
   CrashAnalysisResult,
+  KnownConflictWarning,
   ModAnalysisReport,
   UnifiedModpack,
 } from "@/types";
@@ -13,15 +14,18 @@ import type {
 export default function HomePage() {
   const [packInfo, setPackInfo] = useState<UnifiedModpack>();
   const [reports, setReports] = useState<Record<string, ModAnalysisReport>>();
+  const [conflicts, setConflicts] = useState<KnownConflictWarning[]>();
   const [crashReport, setCrashReport] = useState<CrashAnalysisResult>();
   const [error, setError] = useState<string>();
 
   const handlePackAnalyzed = (data: {
     packInfo: UnifiedModpack;
     reports: Record<string, ModAnalysisReport>;
+    conflicts?: KnownConflictWarning[];
   }) => {
     setPackInfo(data.packInfo);
     setReports(data.reports);
+    setConflicts(data.conflicts);
     setCrashReport(undefined);
     setError(undefined);
   };
@@ -34,6 +38,7 @@ export default function HomePage() {
   const handleReset = () => {
     setPackInfo(undefined);
     setReports(undefined);
+    setConflicts(undefined);
     setCrashReport(undefined);
     setError(undefined);
   };
@@ -70,6 +75,7 @@ export default function HomePage() {
 
       {hasAnalysis ? (
         <Dashboard
+          conflicts={conflicts}
           crashReport={crashReport}
           onExport={packInfo && reports ? handleExport : undefined}
           onReset={handleReset}

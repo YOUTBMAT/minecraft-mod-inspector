@@ -3,6 +3,7 @@
 import React, { useCallback, useState } from "react";
 import type {
   CrashAnalysisResult,
+  KnownConflictWarning,
   ModAnalysisReport,
   UnifiedModpack,
 } from "@/types";
@@ -10,6 +11,7 @@ import type {
 interface PackAnalysisData {
   packInfo: UnifiedModpack;
   reports: Record<string, ModAnalysisReport>;
+  conflicts?: KnownConflictWarning[];
 }
 
 interface FileUploaderProps {

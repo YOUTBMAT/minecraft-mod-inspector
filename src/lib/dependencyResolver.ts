@@ -35,6 +35,12 @@ export async function analyzeModpack(
       if (curseForgeMod?.updateAvailable) {
         report.latestVersion = curseForgeMod.latestVersion;
         report.status = "SAFE_UPDATE";
+        if (curseForgeMod.latestDownloadUrl) {
+          report.latestFile = {
+            url: curseForgeMod.latestDownloadUrl,
+            fileName: curseForgeMod.latestFileName ?? curseForgeMod.latestVersion,
+          };
+        }
       }
       reports.set(installedMod.id, report);
       continue;
@@ -47,11 +53,15 @@ export async function analyzeModpack(
     );
 
     if (!update || update.latestVersionNumber === installedMod.currentVersion) {
+      if (update?.latestFile) {
+        report.latestFile = update.latestFile;
+      }
       reports.set(installedMod.id, report);
       continue;
     }
 
     report.latestVersion = update.latestVersionNumber;
+    report.latestFile = update.latestFile;
 
     const conflictingMod = update.dependencies.incompatible.find((dependency) =>
       installedMap.has(dependency.project_id),

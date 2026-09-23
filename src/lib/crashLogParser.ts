@@ -13,14 +13,34 @@ export function parseCrashReport(logContent: string): CrashAnalysisResult {
     return javaMismatch;
   }
 
+  const outOfMemory = detectOutOfMemory(logContent);
+  if (outOfMemory) {
+    return outOfMemory;
+  }
+
   const missingDependency = detectMissingDependency(logContent);
   if (missingDependency) {
     return missingDependency;
   }
 
+  const duplicateModId = detectDuplicateModId(logContent);
+  if (duplicateModId) {
+    return duplicateModId;
+  }
+
   const mixinConflict = detectMixinConflict(logContent);
   if (mixinConflict) {
     return mixinConflict;
+  }
+
+  const incompatibleMods = detectIncompatibleMods(logContent);
+  if (incompatibleMods) {
+    return incompatibleMods;
+  }
+
+  const corruptedModFile = detectCorruptedModFile(logContent);
+  if (corruptedModFile) {
+    return corruptedModFile;
   }
 
   return {
@@ -29,6 +49,110 @@ export function parseCrashReport(logContent: string): CrashAnalysisResult {
     details: "O log não correspondeu aos padrões conhecidos de diagnóstico.",
     recommendation:
       'Procure pelas linhas que contêm "Caused by:" para encontrar a causa original do erro.',
+  };
+}
+
+function detectOutOfMemory(logContent: string): CrashAnalysisResult | null {
+  const match = logContent.match(
+    /java\.lang\.OutOfMemoryError:?\s*([\w\s]+)?/i,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const reason = match[1]?.trim();
+
+  return {
+    type: "OUT_OF_MEMORY",
+    title: "Memória insuficiente (Out of Memory)",
+    details: reason
+      ? `O Java ficou sem memória disponível (${reason}).`
+      : "O Java ficou sem memória disponível durante a execução.",
+    recommendation:
+      "Aumente a memória alocada (-Xmx) nas configurações do launcher, ou remova mods pesados (texturas em alta resolução, shaders, mods de geração de mundo) que consomem muita RAM.",
+  };
+}
+
+function detectDuplicateModId(
+  logContent: string,
+): CrashAnalysisResult | null {
+  const match = logContent.match(
+    /duplicate\s+mod\s*(?:id)?[:\s]+['"]?([\w.-]+)['"]?/i,
+  ) ?? logContent.match(
+    /mods?\s+share\s+(?:the\s+)?(?:same\s+)?id\s+['"]?([\w.-]+)['"]?/i,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    type: "DUPLICATE_MOD_ID",
+    title: "ID de mod duplicado",
+    suspectedMod: match[1],
+    details: `Mais de um arquivo de mod está registando o mesmo ID (${match[1]}). Isto normalmente acontece quando o mesmo mod foi instalado duas vezes (por exemplo em versões diferentes).`,
+    recommendation: `Verifique a pasta de mods e remova a cópia duplicada ou desatualizada de ${match[1]}.`,
+  };
+}
+
+function detectIncompatibleMods(
+  logContent: string,
+): CrashAnalysisResult | null {
+  if (!/incompatib(?:le|ility|ilities)/i.test(logContent)) {
+    return null;
+  }
+
+  const explicitMatch = logContent.match(
+    /mod\s+['"]?([\w.-]+)['"]?\s+(?:is|are)\s+incompatible\s+with\s+['"]?([\w.-]+)['"]?/i,
+  );
+
+  if (explicitMatch) {
+    return {
+      type: "INCOMPATIBLE_MODS",
+      title: "Mods incompatíveis detectados",
+      suspectedMod: explicitMatch[1],
+      details: `${explicitMatch[1]} foi identificado como incompatível com ${explicitMatch[2]}.`,
+      recommendation: `Remova ou atualize um dos dois mods (${explicitMatch[1]} ou ${explicitMatch[2]}) para versões compatíveis entre si.`,
+    };
+  }
+
+  const sectionMatch = logContent.match(/Incompatible mods found!?[\s\S]{0,400}/i);
+  if (!sectionMatch) {
+    return null;
+  }
+
+  return {
+    type: "INCOMPATIBLE_MODS",
+    title: "Mods incompatíveis detectados",
+    details: getRelevantLine(sectionMatch[0]),
+    recommendation:
+      "Consulte a secção 'Incompatible mods found' no log completo para identificar quais mods precisam ser removidos ou atualizados.",
+  };
+}
+
+function detectCorruptedModFile(
+  logContent: string,
+): CrashAnalysisResult | null {
+  if (
+    !/(ZipException|invalid CEN header|zip END header not found|Error reading zip file)/i.test(
+      logContent,
+    )
+  ) {
+    return null;
+  }
+
+  const jarMatch = logContent.match(/([\w.\-]+\.jar)/i);
+
+  return {
+    type: "CORRUPTED_MOD_FILE",
+    title: "Arquivo de mod corrompido",
+    ...(jarMatch ? { suspectedMod: jarMatch[1] } : {}),
+    details: jarMatch
+      ? `O arquivo ${jarMatch[1]} parece estar corrompido ou incompleto (erro ao ler o ZIP).`
+      : "Um dos arquivos .jar de mod parece estar corrompido ou incompleto (erro ao ler o ZIP).",
+    recommendation:
+      "Baixe novamente o arquivo do mod a partir da fonte oficial (Modrinth/CurseForge) e substitua o arquivo corrompido na pasta de mods.",
   };
 }
 

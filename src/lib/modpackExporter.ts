@@ -1,10 +1,20 @@
 import JSZip from "jszip";
-import type { ModAnalysisReport, UnifiedModpack } from "@/types";
+import type {
+  ModAnalysisReport,
+  PortCandidate,
+  PortTargetFormat,
+  UnifiedModpack,
+} from "@/types";
 
 interface ExportMod {
   id: string;
   version: string;
   fileId?: string | number;
+  fileName?: string;
+  downloadUrl?: string;
+  fileSize?: number;
+  sha1?: string;
+  sha512?: string;
 }
 
 export async function exportUpdatedModpack(
@@ -39,6 +49,62 @@ export async function exportUpdatedModpack(
   }
 }
 
+/**
+ * Exports a modpack ported to a different platform than the one it was
+ * uploaded in, using only mods the user explicitly confirmed a match for
+ * (see PortReviewPanel) — never auto-applies a match.
+ */
+export async function exportPortedModpack(
+  packMeta: {
+    name: string;
+    gameVersion: string;
+    loader: UnifiedModpack["loader"];
+    loaderVersion: string;
+  },
+  targetFormat: PortTargetFormat,
+  confirmedCandidates: PortCandidate[],
+): Promise<void> {
+  try {
+    const mods: ExportMod[] = confirmedCandidates.map((candidate) => ({
+      id: candidate.targetId,
+      version: targetFormat === "curseforge" ? candidate.fileId ?? "0" : candidate.targetId,
+      fileId: candidate.fileId,
+      fileName: candidate.fileName,
+      downloadUrl: candidate.downloadUrl,
+      fileSize: candidate.fileSize,
+      sha1: candidate.sha1,
+      sha512: candidate.sha512,
+    }));
+
+    const pseudoPack: UnifiedModpack = {
+      format: targetFormat,
+      name: packMeta.name,
+      gameVersion: packMeta.gameVersion,
+      loader: packMeta.loader,
+      loaderVersion: packMeta.loaderVersion,
+      mods: [],
+    };
+
+    const manifest =
+      targetFormat === "modrinth"
+        ? createModrinthManifest(pseudoPack, mods)
+        : createCurseForgeManifest(pseudoPack, mods);
+    const manifestName = targetFormat === "modrinth" ? "modrinth.index.json" : "manifest.json";
+    const filename = targetFormat === "modrinth" ? "modpack-portado.mrpack" : "modpack-portado.zip";
+
+    const archive = new JSZip();
+    archive.file(manifestName, JSON.stringify(manifest, null, 2));
+    const blob = await archive.generateAsync({ type: "blob" });
+
+    triggerDownload(blob, filename);
+  } catch (error) {
+    console.error("Falha ao exportar o modpack portado:", error);
+    throw new Error("Não foi possível exportar o modpack portado.", {
+      cause: error,
+    });
+  }
+}
+
 function collectUpdatedMods(
   originalPack: UnifiedModpack,
   reports: Record<string, ModAnalysisReport>,
@@ -53,6 +119,11 @@ function collectUpdatedMods(
       id: mod.id,
       version: shouldUpdate ? report.latestVersion : String(mod.fileId ?? "unknown"),
       fileId: mod.fileId,
+      fileName: report?.latestFile?.fileName,
+      downloadUrl: report?.latestFile?.url,
+      fileSize: report?.latestFile?.fileSize,
+      sha1: report?.latestFile?.sha1,
+      sha512: report?.latestFile?.sha512,
     };
   });
 
@@ -64,7 +135,16 @@ function collectUpdatedMods(
 
     for (const requiredModId of report.requiredNewMods) {
       if (!existingIds.has(requiredModId)) {
-        mods.push({ id: requiredModId, version: "unknown", fileId: undefined });
+        mods.push({
+          id: requiredModId,
+          version: "unknown",
+          fileId: undefined,
+          fileName: undefined,
+          downloadUrl: undefined,
+          fileSize: undefined,
+          sha1: undefined,
+          sha512: undefined,
+        });
         existingIds.add(requiredModId);
       }
     }
@@ -92,8 +172,17 @@ function createModrinthManifest(
       [loaderKey]: originalPack.loaderVersion,
     },
     files: mods.map((mod) => ({
-      path: `mods/${mod.id}-${mod.version}.jar`,
-      downloads: [],
+      path: `mods/${mod.fileName ?? `${mod.id}-${mod.version}.jar`}`,
+      downloads: mod.downloadUrl ? [mod.downloadUrl] : [],
+      // The Modrinth App's mrpack parser requires fileSize and hashes on
+      // every entry, even ones with no known download (empty string/0
+      // are schema-valid placeholders; such entries need manual install
+      // anyway since they have no download source).
+      fileSize: mod.fileSize ?? 0,
+      hashes: {
+        sha1: mod.sha1 ?? "",
+        sha512: mod.sha512 ?? "",
+      },
     })),
   };
 }
