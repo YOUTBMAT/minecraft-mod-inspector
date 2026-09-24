@@ -201,6 +201,25 @@ async function fetchResolvedMods(
       batch.map((mod) => Number(mod.id)).filter(Number.isSafeInteger),
       apiKey,
     );
+    const projectFiles = new Map<number, CurseForgeFile[]>();
+    await Promise.all(
+      batch
+        .map((mod) => Number(mod.id))
+        .filter(Number.isSafeInteger)
+        .map(async (modId) => {
+          const files = await fetchProjectFiles(modId, gameVersion, apiKey);
+          projectFiles.set(modId, files);
+          const apiMod = apiMods.get(modId);
+          if (apiMod) {
+            apiMod.latestFiles = Array.from(
+              new Map([
+                ...(apiMod.latestFiles ?? []).map((file) => [file.id, file] as const),
+                ...files.map((file) => [file.id, file] as const),
+              ]).values(),
+            );
+          }
+        }),
+    );
     const apiFiles = await fetchFileBatch(
       batch.map((mod) => Number(mod.fileId)).filter(Number.isSafeInteger),
       apiKey,
@@ -656,4 +675,32 @@ function isCompatibleProjectFile(
   }
 
   return isCompatibleFile(file, gameVersion, loader);
+}
+
+async function fetchProjectFiles(
+  modId: number,
+  gameVersion: string,
+  apiKey: string,
+): Promise<CurseForgeFile[]> {
+  try {
+    const url = new URL(`${CURSEFORGE_API_URL}/${modId}/files`);
+    url.searchParams.set("gameVersion", gameVersion);
+    url.searchParams.set("pageSize", "50");
+    url.searchParams.set("index", "0");
+    const response = await fetch(url, {
+      headers: { "x-api-key": apiKey },
+    });
+    if (!response.ok) {
+      return [];
+    }
+
+    const body = (await response.json()) as CurseForgeFileResponse;
+    return body.data ?? [];
+  } catch (error) {
+    console.log(
+      `[CurseForge] Falha ao consultar arquivos do mod ${modId}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return [];
+  }
 }
