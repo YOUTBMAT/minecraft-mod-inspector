@@ -12,6 +12,7 @@ import type {
   UnifiedModpack,
 } from "@/types";
 import { exportPortedModpack } from "@/lib/modpackExporter";
+import { CommunityReportsDrawer } from "@/components/modpack/CommunityReportsDrawer";
 
 interface DashboardProps {
   packInfo?: UnifiedModpack;
@@ -394,6 +395,10 @@ function ModTableRows({
         <td className="min-w-0 px-2 py-4 font-semibold text-slate-900 sm:px-3">
           <span className="block truncate" title={report.modName ?? report.modId}>{report.modName ?? report.modId}</span>
           {report.modName ? <span className="block truncate text-xs font-normal text-slate-400" title={`#${report.modId}`}>#{report.modId}</span> : null}
+          <CommunityReportsDrawer
+            errorSnippet={report.conflictDetails?.[0]}
+            modName={report.modName ?? report.modId}
+          />
         </td>
         <td className="min-w-0 px-2 py-4 text-xs text-slate-600 sm:px-3"><span className="block truncate" title={installedVersion}>{installedVersion}</span></td>
         <td className="min-w-0 px-2 py-4 text-xs text-slate-600 sm:px-3"><span className="block truncate" title={report.latestVersion}>{report.latestVersion}</span></td>
