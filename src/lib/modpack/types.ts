@@ -1,3 +1,5 @@
+import type { VersionCheckResult } from "./version-comparator";
+
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 
 export type IssueCategory =
@@ -28,6 +30,7 @@ export interface ModMetadata {
     mandatory: boolean;
   }>;
   fileName: string;
+  versionStatus?: VersionCheckResult;
 }
 
 export interface AnalysisReport {
