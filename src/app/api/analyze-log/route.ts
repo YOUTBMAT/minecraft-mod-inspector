@@ -1,12 +1,23 @@
 import { NextResponse } from "next/server";
 import { parseCrashReport } from "@/lib/crashLogParser";
+import { analyzeCrashLog } from "@/lib/modpack/crash-analyzer";
 
 export async function POST(request: Request) {
   try {
     const contentType = request.headers.get("content-type") ?? "";
     let logContent: string;
 
-    if (contentType.includes("multipart/form-data")) {
+    if (contentType.includes("application/json")) {
+      const body = (await request.json()) as { logText?: unknown };
+      if (typeof body.logText !== "string") {
+        return NextResponse.json(
+          { error: "Texto do log de crash é obrigatório." },
+          { status: 400 },
+        );
+      }
+
+      logContent = body.logText;
+    } else if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
       const fileEntry = formData.get("file");
 
@@ -27,6 +38,10 @@ export async function POST(request: Request) {
         { error: "O conteúdo do log não pode estar vazio." },
         { status: 400 },
       );
+    }
+
+    if (contentType.includes("application/json")) {
+      return NextResponse.json(analyzeCrashLog(logContent), { status: 200 });
     }
 
     return NextResponse.json(parseCrashReport(logContent), { status: 200 });

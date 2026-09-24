@@ -13,8 +13,7 @@
     "update-mods": "node scripts/cli/mod-updater.mjs"
   },
   "dependencies": {
-    "@types/jszip": "^3.4.1",
-    "jszip": "^3.10.1",
+    "jszip": "^3.10.2",
     "next": "^16.3.6",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
@@ -22,6 +21,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@tailwindcss/postcss": "^4.1.13",
+    "@types/jszip": "^3.4.0",
     "@types/node": "^22.15.30",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
