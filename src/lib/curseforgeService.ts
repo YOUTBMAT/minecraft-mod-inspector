@@ -742,3 +742,21 @@ async function fetchProjectNameById(
 function isNumericModName(name: string | undefined): boolean {
   return /^\d+$/.test(name?.trim() ?? "");
 }
+
+export async function resolveCurseForgeProjectNames(
+  projectIds: string[],
+): Promise<Map<string, string>> {
+  const apiKey = process.env.CURSEFORGE_API_KEY;
+  const numericIds = Array.from(new Set(projectIds)).filter((id) => /^\d+$/.test(id));
+  if (!apiKey || numericIds.length === 0) {
+    return new Map();
+  }
+
+  const names = await Promise.all(
+    numericIds.map(async (projectId) => {
+      const name = await fetchProjectNameById(Number(projectId), apiKey);
+      return name ? ([projectId, name] as const) : undefined;
+    }),
+  );
+  return new Map(names.filter((entry): entry is readonly [string, string] => entry !== undefined));
+}

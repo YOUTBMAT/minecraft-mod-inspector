@@ -7,6 +7,7 @@ import {
   FABRIC_BRIDGE_PROJECT_SLUGS,
   resolveCurseForgeMods,
   resolveCurseForgeModsBySlug,
+  resolveCurseForgeProjectNames,
   resolveRecommendedModLoaderVersion,
 } from "@/lib/curseforgeService";
 import { resolveModrinthProjectMeta } from "@/lib/modrinthService";
@@ -142,6 +143,9 @@ export async function POST(request: Request) {
       ...report.cascadingUpdates,
       ...report.conflictingMods,
     ]);
+    const missingCurseForgeNames = packInfo.format === "curseforge"
+      ? await resolveCurseForgeProjectNames(reportModIds)
+      : new Map<string, string>();
     const allModrinthMeta = packInfo.format === "modrinth"
       ? await resolveModrinthProjectMeta([
           ...packInfo.mods.map((mod) => mod.id),
@@ -163,10 +167,25 @@ export async function POST(request: Request) {
     for (const [id, mod] of allModrinthMeta ?? []) {
       modNames.set(id, mod.title);
     }
+    for (const [id, name] of missingCurseForgeNames) {
+      if (!modNames.has(id) || /^\d+$/.test(modNames.get(id) ?? "")) {
+        modNames.set(id, name);
+      }
+    }
+    const namedPackInfo = {
+      ...exportPackInfo,
+      mods: exportPackInfo.mods.map((mod) => {
+        const resolvedName = modNames.get(mod.id);
+        return resolvedName &&
+          (/^\d+$/.test(mod.name?.trim() ?? "") || !mod.name)
+          ? { ...mod, name: resolvedName }
+          : mod;
+      }),
+    };
 
     return NextResponse.json(
       {
-        packInfo: exportPackInfo,
+        packInfo: namedPackInfo,
         reports: Object.fromEntries(reports),
         conflicts,
         modNames: Object.fromEntries(modNames),
