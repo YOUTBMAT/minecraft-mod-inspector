@@ -533,7 +533,15 @@ function getFinalStatus(
     return "CASCADING_REQUIRED";
   }
 
+  if (isUnknownVersion(report.installedVersion) || isUnknownVersion(report.latestVersion)) {
+    return "UNKNOWN";
+  }
+
   return report.status === "UP_TO_DATE" ? "UP_TO_DATE" : "SAFE_UPDATE";
+}
+
+function isUnknownVersion(version: string | undefined): boolean {
+  return !version || /^(?:não identificada|arquivo unknown)$/i.test(version.trim());
 }
 
 function isContinuityMod(displayName: string, projectId: string): boolean {

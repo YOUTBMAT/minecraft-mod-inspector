@@ -9,6 +9,7 @@ export interface VersionCheckResult {
   channel: ReleaseChannel;
   normalizedCurrent: string;
   normalizedLatest: string;
+  statusText: string;
 }
 
 /** Extrai a versão do mod de um nome de arquivo JAR ou displayName. */
@@ -74,6 +75,20 @@ export function compareModVersions(
   latestRaw: string,
   allowChannels: ReleaseChannel[] = ["release", "beta", "alpha"],
 ): VersionCheckResult {
+  const unknownVersion = (value: string | undefined) =>
+    !value || /^(?:não identificada|arquivo unknown)$/i.test(value.trim());
+  if (unknownVersion(currentRaw) || unknownVersion(latestRaw)) {
+    return {
+      currentVersion: currentRaw,
+      latestVersion: latestRaw || "Não identificada",
+      hasUpdate: false,
+      channel: "release",
+      normalizedCurrent: currentRaw,
+      normalizedLatest: latestRaw || "Não identificada",
+      statusText: "Desconhecido / Manual",
+    };
+  }
+
   const latestChannel = detectReleaseChannel(latestRaw);
 
   if (!allowChannels.includes(latestChannel)) {
@@ -84,6 +99,7 @@ export function compareModVersions(
       channel: latestChannel,
       normalizedCurrent: currentRaw,
       normalizedLatest: latestRaw,
+      statusText: "Atualizado",
     };
   }
 
@@ -102,5 +118,6 @@ export function compareModVersions(
     channel: latestChannel,
     normalizedCurrent,
     normalizedLatest,
+    statusText: hasUpdate ? "Atualização Disponível" : "Atualizado",
   };
 }

@@ -62,7 +62,8 @@ export type ModStatusType =
   | "SAFE_UPDATE"
   | "CASCADING_REQUIRED"
   | "CONFLICT"
-  | "MISSING_DEPENDENCY";
+  | "MISSING_DEPENDENCY"
+  | "UNKNOWN";
 
 export interface InstalledMod {
   id: string;

@@ -32,6 +32,7 @@ const statusLabels: Record<ModStatusType, string> = {
   CASCADING_REQUIRED: "Exige Cascata",
   MISSING_DEPENDENCY: "Falta Dependência",
   CONFLICT: "Conflito Detectado",
+  UNKNOWN: "Desconhecido / Manual",
 };
 
 const statusStyles: Record<ModStatusType, string> = {
@@ -40,6 +41,7 @@ const statusStyles: Record<ModStatusType, string> = {
   CASCADING_REQUIRED: "bg-blue-100 text-blue-800 ring-blue-200",
   MISSING_DEPENDENCY: "bg-orange-100 text-orange-800 ring-orange-200",
   CONFLICT: "bg-red-100 text-red-800 ring-red-200",
+  UNKNOWN: "bg-slate-100 text-slate-600 ring-slate-300",
 };
 
 export function Dashboard({

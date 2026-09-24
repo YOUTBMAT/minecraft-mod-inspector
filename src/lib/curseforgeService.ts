@@ -55,6 +55,10 @@ interface CurseForgeApiResponse {
   data?: CurseForgeApiMod[];
 }
 
+interface CurseForgeProjectResponse {
+  data?: CurseForgeApiMod;
+}
+
 interface CurseForgeModLoader {
   name?: string;
   gameVersion?: string;
@@ -238,7 +242,13 @@ async function fetchResolvedMods(
     }
 
     for (const mod of batch) {
-      const apiMod = apiMods.get(Number(mod.id));
+      let apiMod = apiMods.get(Number(mod.id));
+      if (apiMod && isNumericModName(apiMod.name)) {
+        const enrichedName = await fetchProjectNameById(Number(mod.id), apiKey);
+        if (enrichedName) {
+          apiMod = { ...apiMod, name: enrichedName };
+        }
+      }
       const fileId = String(mod.fileId ?? "unknown");
       resolved.set(
         mod.id,
@@ -394,12 +404,12 @@ function formatResolvedMod(
   );
   const compatible = pickCompatibleFile(mod, gameVersion, loader);
   const latestFileId = compatible?.fileId ?? installedFileId;
-  const installedVersion = extractVersionFromFileName(
-    formatFile(knownInstalledFile, installedFileId),
-  );
+  const installedVersion = knownInstalledFile
+    ? extractVersionFromFileName(formatFile(knownInstalledFile, installedFileId))
+    : "Não identificada";
   const latestVersion = compatible
     ? extractVersionFromFileName(compatible.fileName)
-    : installedVersion;
+    : "Não identificada";
   const supportsFabric = hasProjectLoaderSupport(mod, "fabric") ||
     hasFileLoaderSupport(knownInstalledFile, "fabric");
   const supportsForge = hasProjectLoaderSupport(mod, "forge") ||
@@ -598,8 +608,8 @@ function createFallbackMod(projectId: string, fileId: string): CurseForgeResolve
     projectId,
     fileId,
     displayName: `Mod ${projectId}`,
-    installedVersion: `Arquivo ${fileId}`,
-    latestVersion: `Arquivo ${fileId}`,
+    installedVersion: "Não identificada",
+    latestVersion: "Não identificada",
     latestFileId: fileId,
     updateAvailable: false,
     loaderCompatible: true,
@@ -703,4 +713,32 @@ async function fetchProjectFiles(
     );
     return [];
   }
+}
+
+async function fetchProjectNameById(
+  projectId: number,
+  apiKey: string,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(`${CURSEFORGE_API_URL}/${projectId}`, {
+      headers: { "x-api-key": apiKey },
+    });
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const body = (await response.json()) as CurseForgeProjectResponse;
+    const project = body.data;
+    return isNumericModName(project?.name) ? undefined : project?.name;
+  } catch (error) {
+    console.warn(
+      `[ModInspector] Não foi possível obter o nome do mod para o ID ${projectId}.`,
+      error,
+    );
+    return undefined;
+  }
+}
+
+function isNumericModName(name: string | undefined): boolean {
+  return /^\d+$/.test(name?.trim() ?? "");
 }
