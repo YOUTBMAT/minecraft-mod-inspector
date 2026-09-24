@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseCrashReport } from "@/lib/crashLogParser";
 import { analyzeCrashLog } from "@/lib/modpack/crash-analyzer";
+import { learnIncompatibleMod } from "@/lib/modpack/incompatible-mods-db";
 
 export async function POST(request: Request) {
   try {
@@ -41,7 +42,9 @@ export async function POST(request: Request) {
     }
 
     if (contentType.includes("application/json")) {
-      return NextResponse.json(analyzeCrashLog(logContent), { status: 200 });
+      const report = analyzeCrashLog(logContent);
+      learnFromReport(report);
+      return NextResponse.json(report, { status: 200 });
     }
 
     return NextResponse.json(parseCrashReport(logContent), { status: 200 });
@@ -52,5 +55,25 @@ export async function POST(request: Request) {
       },
       { status: 500 },
     );
+  }
+}
+
+function learnFromReport(report: ReturnType<typeof analyzeCrashLog>): void {
+  if (!report.issues.some((issue) => issue.severity === "CRITICAL")) {
+    return;
+  }
+
+  for (const modId of report.issues.flatMap((issue) => issue.offendingMods)) {
+    if (/^(?:mod|recurso|backport|sodium)$/i.test(modId) || modId.length < 3) {
+      continue;
+    }
+
+    learnIncompatibleMod({
+      modId: modId.replace(/\.jar$/i, ""),
+      aliases: [modId.replace(/\.jar$/i, "")],
+      severity: "CRITICAL",
+      reason: report.issues[0].description,
+      recommendation: report.issues[0].suggestedAction,
+    });
   }
 }

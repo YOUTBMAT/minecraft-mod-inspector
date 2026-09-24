@@ -13,6 +13,8 @@ import type {
 } from "@/types";
 import { exportPortedModpack } from "@/lib/modpackExporter";
 import { CommunityReportsDrawer } from "@/components/modpack/CommunityReportsDrawer";
+import { IncompatibilityAlertCard } from "@/components/modpack/IncompatibilityAlertCard";
+import { checkIncompatibleMod, type IncompatibleModEntry } from "@/lib/modpack/incompatible-mods-db";
 
 interface DashboardProps {
   packInfo?: UnifiedModpack;
@@ -62,6 +64,7 @@ export function Dashboard({
   const [portError, setPortError] = useState<string | null>(null);
   const [portRequiresApiKey, setPortRequiresApiKey] = useState(false);
   const [portSelections, setPortSelections] = useState<Record<string, number | "exclude">>({});
+  const [, setIncompatibilityDecisions] = useState<Record<string, boolean>>({});
 
   const handlePortStart = async (targetFormat: PortTargetFormat) => {
     if (!packInfo) {
@@ -352,6 +355,16 @@ export function Dashboard({
                     modsMap={modsMap}
                     canExpand={canExpand}
                     isExpanded={isExpanded}
+                    incompatibilityEntry={checkIncompatibleMod(
+                      report.modId,
+                      report.modName ?? modsMap.get(report.modId) ?? report.modId,
+                    )}
+                    onIncompatibilityDecision={(keepMod) =>
+                      setIncompatibilityDecisions((previous) => ({
+                        ...previous,
+                        [report.modId]: keepMod,
+                      }))
+                    }
                     onToggle={() => setExpandedModId(isExpanded ? null : report.modId)}
                   />
                 );
@@ -377,6 +390,8 @@ function ModTableRows({
   modsMap,
   canExpand,
   isExpanded,
+  incompatibilityEntry,
+  onIncompatibilityDecision,
   onToggle,
 }: {
   installedVersion: string;
@@ -384,6 +399,8 @@ function ModTableRows({
   modsMap: Map<string, string>;
   canExpand: boolean;
   isExpanded: boolean;
+  incompatibilityEntry: IncompatibleModEntry | null;
+  onIncompatibilityDecision: (keepMod: boolean) => void;
   onToggle: () => void;
 }) {
   const detailItems = getDetailItems(report, modsMap);
@@ -401,6 +418,13 @@ function ModTableRows({
             errorSnippet={report.conflictDetails?.[0]}
             modName={report.modName ?? report.modId}
           />
+          {incompatibilityEntry ? (
+            <IncompatibilityAlertCard
+              entry={incompatibilityEntry}
+              modName={report.modName ?? report.modId}
+              onUserDecision={onIncompatibilityDecision}
+            />
+          ) : null}
         </td>
         <td className="min-w-0 px-2 py-4 text-xs text-slate-600 sm:px-3"><span className="block truncate" title={installedVersion}>{installedVersion}</span></td>
         <td className="min-w-0 px-2 py-4 text-xs text-slate-600 sm:px-3"><span className="block truncate" title={report.latestVersion}>{report.latestVersion}</span></td>
