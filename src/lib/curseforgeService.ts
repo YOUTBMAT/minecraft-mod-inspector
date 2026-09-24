@@ -1,6 +1,7 @@
 const CURSEFORGE_API_URL = "https://api.curseforge.com/v1/mods";
 const CURSEFORGE_SEARCH_URL = "https://api.curseforge.com/v1/mods/search";
 const CURSEFORGE_MODLOADER_URL = "https://api.curseforge.com/v1/minecraft/modloader";
+import { extractVersionFromFileName } from "@/lib/modpack/version-comparator";
 const CURSEFORGE_MINECRAFT_GAME_ID = 432;
 const CURSEFORGE_MOD_CLASS_ID = 6;
 const CURSEFORGE_BATCH_SIZE = 50;
@@ -374,8 +375,12 @@ function formatResolvedMod(
   );
   const compatible = pickCompatibleFile(mod, gameVersion, loader);
   const latestFileId = compatible?.fileId ?? installedFileId;
-  const installedVersion = formatFile(knownInstalledFile, installedFileId);
-  const latestVersion = compatible?.fileName ?? installedVersion;
+  const installedVersion = extractVersionFromFileName(
+    formatFile(knownInstalledFile, installedFileId),
+  );
+  const latestVersion = compatible
+    ? extractVersionFromFileName(compatible.fileName)
+    : installedVersion;
   const supportsFabric = hasProjectLoaderSupport(mod, "fabric") ||
     hasFileLoaderSupport(knownInstalledFile, "fabric");
   const supportsForge = hasProjectLoaderSupport(mod, "forge") ||

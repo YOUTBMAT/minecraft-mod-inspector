@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import type { ModMetadata } from "./types";
+import { extractVersionFromFileName } from "./version-comparator";
 
 export async function parseModJar(
   fileBuffer: Buffer,
@@ -27,7 +28,7 @@ export async function parseModJar(
 
     return {
       modId: modIdMatch?.[1] ?? "unknown",
-      version: versionMatch?.[1] ?? "0.0.0",
+      version: extractVersionFromFileName(versionMatch?.[1] ?? fileName),
       displayName: displayNameMatch?.[1] ?? fileName,
       dependencies,
       fileName,

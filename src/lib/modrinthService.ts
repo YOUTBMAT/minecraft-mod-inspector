@@ -1,4 +1,5 @@
 import type { LatestFileInfo, ModrinthDependency } from "@/types";
+import { extractVersionFromFileName } from "@/lib/modpack/version-comparator";
 
 interface ModrinthVersionFile {
   url: string;
@@ -89,7 +90,7 @@ async function fetchModrinthUpdate(
 
     return {
       latestVersionId: latestVersion.id,
-      latestVersionNumber: latestVersion.version_number,
+      latestVersionNumber: extractVersionFromFileName(latestVersion.version_number),
       releaseDate: latestVersion.date_published,
       dependencies: {
         required: filterDependencies(latestVersion.dependencies, "required"),

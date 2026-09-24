@@ -11,6 +11,20 @@ export interface VersionCheckResult {
   normalizedLatest: string;
 }
 
+/** Extrai a versão do mod de um nome de arquivo JAR ou displayName. */
+export function extractVersionFromFileName(fileName: string): string {
+  if (!fileName) {
+    return "0.0.0";
+  }
+
+  let cleanName = fileName.replace(/\.jar$/i, "");
+  cleanName = cleanName.replace(/(?:mc)?1\.\d+(?:\.\d+)?[-_]/gi, "");
+  cleanName = cleanName.replace(/(?:neoforge|forge|fabric|quilt)[-_]/gi, "");
+
+  const match = cleanName.match(/\d+(?:\.\d+)+/);
+  return match?.[0] ?? fileName;
+}
+
 /** Normaliza versões de mods preservando padrões comuns do Minecraft. */
 export function normalizeModVersion(rawVersion: string): string {
   if (!rawVersion) {
