@@ -57,8 +57,8 @@ nvm use 22
    npm install
    ```
 
-3. **Configurar a CurseForge (opcional):**
-   Defina `CURSEFORGE_API_KEY` no ambiente do servidor para resolver nomes e versões através da API oficial. Sem a chave, a aplicação continua a funcionar com identificadores formatados como fallback.
+3. **Configurar a CurseForge (necessário para packs CurseForge):**
+   Copie `.env.example` para `.env.local` e defina `CURSEFORGE_API_KEY`. A chave é um hash bcrypt cheio de `$`, e o Next expande `$...` como variável em ficheiros `.env`, descartando-a (aspas não resolvem). **Escape cada `$` com `\$`** (ex.: `CURSEFORGE_API_KEY=\$2a\$10\$...`). Na Vercel cole a chave sem escapar. Sem a chave (ou com ela inválida) os packs CurseForge aparecem como "Mod 12345 / Não identificada", e a aplicação mostra um aviso a explicar o motivo. Para conferir a configuração sem expor a chave, abra `/api/health` (`curseforgeKey`: `present`, `malformed` ou `missing`).
 
 4. **Iniciar o servidor de desenvolvimento:**
    ```bash

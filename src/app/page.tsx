@@ -16,6 +16,7 @@ export default function HomePage() {
   const [reports, setReports] = useState<Record<string, ModAnalysisReport>>();
   const [conflicts, setConflicts] = useState<KnownConflictWarning[]>();
   const [modNames, setModNames] = useState<Record<string, string>>();
+  const [warnings, setWarnings] = useState<string[]>();
   const [crashReport, setCrashReport] = useState<CrashAnalysisResult>();
   const [error, setError] = useState<string>();
 
@@ -24,7 +25,9 @@ export default function HomePage() {
     reports: Record<string, ModAnalysisReport>;
     conflicts?: KnownConflictWarning[];
     modNames?: Record<string, string>;
+    warnings?: string[];
   }) => {
+    setWarnings(data.warnings);
     setPackInfo(data.packInfo);
     setReports(data.reports);
     setConflicts(data.conflicts);
@@ -43,6 +46,7 @@ export default function HomePage() {
     setReports(undefined);
     setConflicts(undefined);
     setModNames(undefined);
+    setWarnings(undefined);
     setCrashReport(undefined);
     setError(undefined);
   };
@@ -86,6 +90,7 @@ export default function HomePage() {
           packInfo={packInfo}
           reports={reports}
           modNames={modNames}
+          warnings={warnings}
         />
       ) : (
         <section className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center gap-10 px-6 py-16">

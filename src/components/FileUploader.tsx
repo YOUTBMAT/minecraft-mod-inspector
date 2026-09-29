@@ -14,6 +14,7 @@ interface PackAnalysisData {
   reports: Record<string, ModAnalysisReport>;
   conflicts?: KnownConflictWarning[];
   modNames?: Record<string, string>;
+  warnings?: string[];
 }
 
 interface FileUploaderProps {

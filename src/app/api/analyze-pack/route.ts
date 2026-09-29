@@ -3,6 +3,8 @@ import type { InstalledMod } from "@/types";
 import { analyzeModpack } from "@/lib/dependencyResolver";
 import { parseModpackManifest } from "@/lib/modpackParser";
 import {
+  getCurseForgeKeyState,
+  isUnresolvedCurseForgeMod,
   FABRIC_BRIDGE_PROJECT_IDS,
   FABRIC_BRIDGE_PROJECT_SLUGS,
   resolveCurseForgeMods,
@@ -204,12 +206,15 @@ export async function POST(request: Request) {
       }),
     };
 
+    const warnings = buildCurseForgeWarnings(packInfo.format, curseForgeMods);
+
     return NextResponse.json(
       {
         packInfo: namedPackInfo,
         reports: Object.fromEntries(reports),
         conflicts,
         modNames: Object.fromEntries(modNames),
+        warnings,
       },
       { status: 200 },
     );
@@ -225,6 +230,42 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+}
+
+/**
+ * Sem isto, uma chave ausente/inválida fazia o app mostrar "Mod 123 / Não
+ * identificada" para tudo, sem nenhuma explicação.
+ */
+function buildCurseForgeWarnings(
+  format: string,
+  curseForgeMods: Map<string, Parameters<typeof isUnresolvedCurseForgeMod>[0]> | undefined,
+): string[] {
+  if (format !== "curseforge" || !curseForgeMods || curseForgeMods.size === 0) {
+    return [];
+  }
+
+  const mods = Array.from(curseForgeMods.values());
+  const unresolved = mods.filter(isUnresolvedCurseForgeMod).length;
+  if (unresolved === 0) {
+    return [];
+  }
+
+  const keyState = getCurseForgeKeyState();
+  if (keyState === "missing") {
+    return [
+      "A variável CURSEFORGE_API_KEY não está definida no servidor, por isso nomes, versões e atualizações dos mods do CurseForge não puderam ser consultados. Se você a colocou no .env.local, cada $ da chave precisa ser escapado como \\$ (sem isso o Next descarta a chave inteira); depois reinicie o servidor.",
+    ];
+  }
+
+  const keyHint = keyState === "malformed"
+    ? " A chave configurada parece incompleta (o esperado são 60 caracteres começando com $2a$). Em arquivos .env, escape cada $ como \\$."
+    : " Verifique se a chave é válida e se não atingiu o limite de requisições.";
+
+  return [
+    unresolved === mods.length
+      ? `Nenhum dos ${mods.length} mods pôde ser consultado na API do CurseForge.${keyHint}`
+      : `${unresolved} de ${mods.length} mods não puderam ser consultados na API do CurseForge; eles aparecem como "Desconhecido / Manual".`,
+  ];
 }
 
 function maxVersion(...versions: Array<string | undefined>): string {

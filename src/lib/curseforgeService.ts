@@ -603,13 +603,37 @@ export async function searchCurseForgeMods(
   }
 }
 
+const FALLBACK_VERSION_LABEL = "Não identificada";
+
+/** true quando o mod veio do modo de contingência (a API do CurseForge não respondeu para ele). */
+export function isUnresolvedCurseForgeMod(mod: CurseForgeResolvedMod): boolean {
+  return mod.installedVersion === FALLBACK_VERSION_LABEL &&
+    mod.displayName === `Mod ${mod.projectId}`;
+}
+
+export type CurseForgeKeyState = "missing" | "malformed" | "present";
+
+/**
+ * Estado da chave sem expor o valor. Chaves do CurseForge são hashes bcrypt
+ * ("$2a$10$..." com 60 caracteres). Em arquivos .env o Next expande `$...` como
+ * variável e descarta a chave, a menos que cada `$` seja escapado com `\$`
+ * (aspas não ajudam). Na Vercel a chave é lida sem expansão.
+ */
+export function getCurseForgeKeyState(): CurseForgeKeyState {
+  const key = process.env.CURSEFORGE_API_KEY?.trim();
+  if (!key) {
+    return "missing";
+  }
+  return key.startsWith("$2a$") && key.length === 60 ? "present" : "malformed";
+}
+
 function createFallbackMod(projectId: string, fileId: string): CurseForgeResolvedMod {
   return {
     projectId,
     fileId,
     displayName: `Mod ${projectId}`,
-    installedVersion: "Não identificada",
-    latestVersion: "Não identificada",
+    installedVersion: FALLBACK_VERSION_LABEL,
+    latestVersion: FALLBACK_VERSION_LABEL,
     latestFileId: fileId,
     updateAvailable: false,
     loaderCompatible: true,

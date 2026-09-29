@@ -21,6 +21,7 @@ interface DashboardProps {
   reports?: Record<string, ModAnalysisReport>;
   conflicts?: KnownConflictWarning[];
   modNames?: Record<string, string>;
+  warnings?: string[];
   crashReport?: CrashAnalysisResult;
   onReset: () => void;
   onExport?: () => void;
@@ -51,6 +52,7 @@ export function Dashboard({
   reports = {},
   conflicts = [],
   modNames = {},
+  warnings = [],
   crashReport,
   onReset,
   onExport,
@@ -257,6 +259,17 @@ export function Dashboard({
           <SummaryCard label="Exigem cascata" value={cascadingUpdates} tone="blue" />
         </div>
       </header>
+
+      {warnings.map((warning) => (
+        <div
+          key={warning}
+          role="alert"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          <strong className="font-semibold">Atenção: </strong>
+          {warning}
+        </div>
+      ))}
 
       {crashReport ? <CrashReportCard report={crashReport} /> : null}
 
