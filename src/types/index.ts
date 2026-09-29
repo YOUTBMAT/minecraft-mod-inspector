@@ -69,6 +69,10 @@ export interface InstalledMod {
   id: string;
   currentVersion: string;
   name?: string;
+  /** Modrinth: id da versão instalada (vem da URL de download do pack). */
+  versionId?: string;
+  /** Modrinth: data de publicação da versão instalada, para evitar "downgrades". */
+  publishedAt?: string;
 }
 
 export interface LatestFileInfo {

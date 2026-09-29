@@ -20,6 +20,7 @@ interface ModrinthVersionResponse {
   loaders: string[];
   dependencies: ModrinthDependency[];
   date_published: string;
+  version_type?: "release" | "beta" | "alpha";
   files: ModrinthVersionFile[];
 }
 
@@ -43,6 +44,63 @@ const updateCheckCache = new Map<
   Promise<UpdateCheckResult | null>
 >();
 
+// A Modrinth limita ~300 req/min por IP. Sem controle de concorrência, um pack
+// grande dispara centenas de requests ao mesmo tempo e as respostas 429 eram
+// tratadas como "sem atualização".
+const MAX_CONCURRENT_REQUESTS = 6;
+const MAX_RATE_LIMIT_RETRIES = 3;
+let activeRequests = 0;
+const waitingForSlot: Array<() => void> = [];
+
+async function acquireSlot(): Promise<void> {
+  if (activeRequests < MAX_CONCURRENT_REQUESTS) {
+    activeRequests += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => waitingForSlot.push(resolve));
+}
+
+function releaseSlot(): void {
+  const next = waitingForSlot.shift();
+  if (next) {
+    next(); // repassa o slot direto, sem abrir janela para outra chamada furar a fila
+  } else {
+    activeRequests -= 1;
+  }
+}
+
+/**
+ * fetch com limite de concorrência e retry em 429 (respeita Retry-After).
+ * Lança erro em falha de rede ou se o rate limit persistir.
+ */
+async function modrinthFetch(url: URL, init?: RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    await acquireSlot();
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: { "User-Agent": MODRINTH_USER_AGENT, ...init?.headers },
+      });
+    } finally {
+      releaseSlot();
+    }
+
+    if (response.status !== 429) {
+      return response;
+    }
+    if (attempt >= MAX_RATE_LIMIT_RETRIES) {
+      throw new Error("Modrinth rate limit excedido.");
+    }
+
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 10_000)
+      : 1000 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 export async function checkModrinthUpdate(
   projectIdOrSlug: string,
   gameVersion: string,
@@ -54,7 +112,14 @@ export async function checkModrinthUpdate(
     return cachedResult;
   }
 
-  const request = fetchModrinthUpdate(projectIdOrSlug, gameVersion, loader);
+  const request = fetchModrinthUpdate(projectIdOrSlug, gameVersion, loader)
+    .catch((error: unknown) => {
+      // Falha transitória (rede/429): não guardar no cache, senão o erro fica
+      // "colado" até o processo reiniciar.
+      updateCheckCache.delete(cacheKey);
+      console.warn(`[Modrinth] Falha ao consultar ${projectIdOrSlug}:`, error);
+      return null;
+    });
   updateCheckCache.set(cacheKey, request);
   return request;
 }
@@ -70,19 +135,21 @@ async function fetchModrinthUpdate(
   url.searchParams.set("game_versions", JSON.stringify([gameVersion]));
   url.searchParams.set("loaders", JSON.stringify([loader.toLowerCase()]));
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": MODRINTH_USER_AGENT,
-      },
-    });
+  {
+    const response = await modrinthFetch(url);
 
-    if (!response.ok) {
+    if (response.status === 404) {
       return null;
+    }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
     }
 
     const versions = (await response.json()) as ModrinthVersionResponse[];
-    const latestVersion = versions[0];
+    // Prefere a versão estável mais recente; só cai para beta/alpha se o
+    // projeto não tiver nenhum release para essa versão/loader.
+    const latestVersion = versions.find((version) => version.version_type === "release")
+      ?? versions[0];
 
     if (!latestVersion) {
       return null;
@@ -102,8 +169,6 @@ async function fetchModrinthUpdate(
       },
       latestFile: extractLatestFile(latestVersion.files),
     };
-  } catch {
-    return null;
   }
 }
 
@@ -191,9 +256,7 @@ export async function searchModrinthProjects(
       JSON.stringify([["project_type:mod"], [`categories:${loader.toLowerCase()}`]]),
     );
 
-    const response = await fetch(url, {
-      headers: { "User-Agent": MODRINTH_USER_AGENT },
-    });
+    const response = await modrinthFetch(url);
 
     if (!response.ok) {
       return [];
@@ -213,35 +276,87 @@ export async function searchModrinthProjects(
   }
 }
 
+const BULK_CHUNK_SIZE = 100;
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 async function fetchProjectMeta(
   projectIds: string[],
 ): Promise<Map<string, ModrinthProjectMeta>> {
-  if (projectIds.length === 0) {
-    return new Map();
-  }
+  const result = new Map<string, ModrinthProjectMeta>();
 
-  try {
-    const url = new URL("https://api.modrinth.com/v2/projects");
-    url.searchParams.set("ids", JSON.stringify(projectIds));
+  // Em lotes: com centenas de ids a URL estourava o limite de tamanho.
+  for (const batch of chunkArray(projectIds, BULK_CHUNK_SIZE)) {
+    try {
+      const url = new URL("https://api.modrinth.com/v2/projects");
+      url.searchParams.set("ids", JSON.stringify(batch));
 
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": MODRINTH_USER_AGENT,
-      },
-    });
+      const response = await modrinthFetch(url);
+      if (!response.ok) {
+        continue;
+      }
 
-    if (!response.ok) {
-      return new Map();
+      const projects = (await response.json()) as ModrinthProjectResponse[];
+      for (const project of projects) {
+        result.set(project.id, {
+          id: project.id,
+          slug: project.slug,
+          title: project.title,
+        });
+      }
+    } catch (error) {
+      console.warn("[Modrinth] Falha ao resolver metadados de projetos:", error);
     }
-
-    const projects = (await response.json()) as ModrinthProjectResponse[];
-    return new Map(
-      projects.map((project) => [
-        project.id,
-        { id: project.id, slug: project.slug, title: project.title },
-      ]),
-    );
-  } catch {
-    return new Map();
   }
+
+  return result;
+}
+
+export interface ModrinthInstalledVersion {
+  id: string;
+  versionNumber: string;
+  publishedAt: string;
+}
+
+/**
+ * Resolve, em lote, as versões que o pack tem instaladas (a partir do id da
+ * versão que vem na URL de download do modrinth.index.json). Sem isso não há
+ * como saber se existe atualização de verdade.
+ */
+export async function resolveModrinthInstalledVersions(
+  versionIds: string[],
+): Promise<Map<string, ModrinthInstalledVersion>> {
+  const result = new Map<string, ModrinthInstalledVersion>();
+  const uniqueIds = Array.from(new Set(versionIds));
+
+  for (const batch of chunkArray(uniqueIds, BULK_CHUNK_SIZE)) {
+    try {
+      const url = new URL("https://api.modrinth.com/v2/versions");
+      url.searchParams.set("ids", JSON.stringify(batch));
+
+      const response = await modrinthFetch(url);
+      if (!response.ok) {
+        continue;
+      }
+
+      const versions = (await response.json()) as ModrinthVersionResponse[];
+      for (const version of versions) {
+        result.set(version.id, {
+          id: version.id,
+          versionNumber: version.version_number,
+          publishedAt: version.date_published,
+        });
+      }
+    } catch (error) {
+      console.warn("[Modrinth] Falha ao resolver versões instaladas:", error);
+    }
+  }
+
+  return result;
 }

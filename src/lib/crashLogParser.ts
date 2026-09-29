@@ -2,9 +2,19 @@ import type { CrashAnalysisResult } from "@/types";
 
 const JAVA_CLASS_VERSIONS: Record<string, string> = {
   "52.0": "Java 8",
+  "53.0": "Java 9",
+  "54.0": "Java 10",
   "55.0": "Java 11",
+  "60.0": "Java 16",
   "61.0": "Java 17",
+  "62.0": "Java 18",
+  "63.0": "Java 19",
+  "64.0": "Java 20",
   "65.0": "Java 21",
+  "66.0": "Java 22",
+  "67.0": "Java 23",
+  "68.0": "Java 24",
+  "69.0": "Java 25",
 };
 
 export function parseCrashReport(logContent: string): CrashAnalysisResult {
@@ -54,7 +64,7 @@ export function parseCrashReport(logContent: string): CrashAnalysisResult {
 
 function detectOutOfMemory(logContent: string): CrashAnalysisResult | null {
   const match = logContent.match(
-    /java\.lang\.OutOfMemoryError:?\s*([\w\s]+)?/i,
+    /java\.lang\.OutOfMemoryError:?[ \t]*([\w ]+)?/i,
   );
 
   if (!match) {
@@ -134,15 +144,18 @@ function detectIncompatibleMods(
 function detectCorruptedModFile(
   logContent: string,
 ): CrashAnalysisResult | null {
-  if (
-    !/(ZipException|invalid CEN header|zip END header not found|Error reading zip file)/i.test(
-      logContent,
-    )
-  ) {
+  const zipError = /(ZipException|invalid CEN header|zip END header not found|Error reading zip file)/i
+    .exec(logContent);
+  if (!zipError) {
     return null;
   }
 
-  const jarMatch = logContent.match(/([\w.\-]+\.jar)/i);
+  // Procura o .jar na vizinhança do erro (antes e depois); o primeiro .jar do
+  // log inteiro quase nunca é o arquivo corrompido.
+  const jarPattern = /([\w+.\-]+?\.jar)/i;
+  const lineStart = logContent.lastIndexOf("\n", zipError.index) + 1;
+  const jarMatch = logContent.slice(lineStart, zipError.index + 400).match(jarPattern)
+    ?? logContent.slice(Math.max(0, lineStart - 400), lineStart).match(jarPattern);
 
   return {
     type: "CORRUPTED_MOD_FILE",
@@ -192,8 +205,9 @@ function detectJavaVersionMismatch(
 function detectMissingDependency(
   logContent: string,
 ): CrashAnalysisResult | null {
+  // Fabric Loader recente: Mod 'X' (x) 1.0 requires version 2.0 or later of mod 'Y' (y), which is missing!
   const fabricMatch = logContent.match(
-    /Mod\s+'([^']+)'\s+requires\s+.+?\s+of\s+mod\s+'([^']+)',\s+which\s+is\s+missing!/i,
+    /Mod\s+'([^']+)'(?:\s*\([^)]*\))?(?:\s+[\w.+-]+)?\s+requires\s+.+?\s+of\s+mod\s+'([^']+)'(?:\s*\([^)]*\))?,\s+which\s+is\s+missing!/i,
   );
 
   if (fabricMatch) {
@@ -201,6 +215,19 @@ function detectMissingDependency(
       fabricMatch[1],
       fabricMatch[2],
       fabricMatch[0],
+    );
+  }
+
+  // Forge/NeoForge modernos: Mod ID: 'y', Requested by: 'x', Expected range: '[1.0,)', Actual version: '[MISSING]'
+  const neoForgeMatch = logContent.match(
+    /Mod ID:\s*'([^']+)',\s*Requested by:\s*'([^']+)',\s*Expected range:\s*'[^']*',\s*Actual version:\s*'\[MISSING\]'/i,
+  );
+
+  if (neoForgeMatch) {
+    return createMissingDependencyResult(
+      neoForgeMatch[2],
+      neoForgeMatch[1],
+      neoForgeMatch[0],
     );
   }
 

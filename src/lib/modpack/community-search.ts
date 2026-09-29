@@ -32,28 +32,37 @@ const SNIPPET_LENGTH = 180;
 export async function searchCommunityReports(
   modName: string,
   errorSnippet?: string,
+  gameVersion?: string,
 ): Promise<CommunitySearchResult> {
   const cleanModName = modName.replace(/[-_]/g, " ").trim();
-  const searchTerms = `${cleanModName} 1.21.1 ${errorSnippet?.trim() || "crash"}`;
-  const reports: CommunityReport[] = [];
+  const version = gameVersion?.trim() ?? "";
+  const searchTerms = [cleanModName, version, "crash"].filter(Boolean).join(" ");
+  const githubReports: CommunityReport[] = [];
+  const redditReports: CommunityReport[] = [];
 
-  await searchGitHub(cleanModName, reports);
-  await searchReddit(cleanModName, reports);
+  // Em paralelo: antes eram duas requisições sequenciais e a versão do jogo
+  // estava fixa em 1.21.1, ignorando o pack do usuário.
+  await Promise.all([
+    searchGitHub(cleanModName, version, githubReports),
+    searchReddit(cleanModName, version, redditReports),
+  ]);
 
   return {
     modId: modName,
+    // Reflete o que foi realmente pesquisado (errorSnippet nunca entrava na busca).
     queryUsed: searchTerms,
-    reports,
+    reports: [...githubReports, ...redditReports],
   };
 }
 
 async function searchGitHub(
   modName: string,
+  gameVersion: string,
   reports: CommunityReport[],
 ): Promise<void> {
   try {
     const githubQuery = encodeURIComponent(
-      `${modName} 1.21.1 in:title,body label:bug,crash`,
+      `${modName} ${gameVersion} in:title,body label:bug,crash`.replace(/\s+/g, " "),
     );
     const response = await fetch(
       `https://api.github.com/search/issues?q=${githubQuery}&per_page=4`,
@@ -106,10 +115,13 @@ async function searchGitHub(
 
 async function searchReddit(
   modName: string,
+  gameVersion: string,
   reports: CommunityReport[],
 ): Promise<void> {
   try {
-    const redditQuery = encodeURIComponent(`${modName} 1.21.1 crash OR issue`);
+    const redditQuery = encodeURIComponent(
+      `${modName} ${gameVersion} crash OR issue`.replace(/\s+/g, " "),
+    );
     const response = await fetch(
       `https://www.reddit.com/search.json?q=${redditQuery}&limit=3&sort=relevance`,
       {

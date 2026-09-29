@@ -104,9 +104,13 @@ export function normalizeModrinth(index: ModrinthIndex): UnifiedModpack {
     throw new Error("O índice Modrinth não define um mod loader suportado.");
   }
 
-  const mods = index.files.map((file) => ({
-    id: extractModrinthProjectId(file.downloads, file.path),
-  }));
+  const mods = index.files.map((file) => {
+    const versionId = extractModrinthVersionId(file.downloads);
+    return {
+      id: extractModrinthProjectId(file.downloads, file.path),
+      ...(versionId ? { fileId: versionId } : {}),
+    };
+  });
 
   return {
     format: "modrinth",
@@ -168,6 +172,17 @@ function findModrinthLoader(
   return found
     ? { loader: found.loader, version: dependencies[found.key] as string }
     : undefined;
+}
+
+/** URLs do CDN: https://cdn.modrinth.com/data/<projectId>/versions/<versionId>/<arquivo>.jar */
+function extractModrinthVersionId(downloads: string[]): string | undefined {
+  for (const download of downloads) {
+    const versionId = download.match(/\/data\/[^/]+\/versions\/([^/]+)\//i)?.[1];
+    if (versionId) {
+      return versionId;
+    }
+  }
+  return undefined;
 }
 
 function extractModrinthProjectId(downloads: string[], path: string): string {

@@ -10,7 +10,11 @@ import {
   resolveCurseForgeProjectNames,
   resolveRecommendedModLoaderVersion,
 } from "@/lib/curseforgeService";
-import { resolveModrinthProjectMeta } from "@/lib/modrinthService";
+import {
+  resolveModrinthInstalledVersions,
+  resolveModrinthProjectMeta,
+} from "@/lib/modrinthService";
+import { extractVersionFromFileName } from "@/lib/modpack/version-comparator";
 import { detectKnownConflicts } from "@/lib/modConflicts";
 
 export async function POST(request: Request) {
@@ -40,28 +44,45 @@ export async function POST(request: Request) {
     const modrinthMeta = packInfo.format === "modrinth"
       ? await resolveModrinthProjectMeta(packInfo.mods.map((mod) => mod.id))
       : undefined;
+    const modrinthInstalled = packInfo.format === "modrinth"
+      ? await resolveModrinthInstalledVersions(
+          packInfo.mods.flatMap((mod) => typeof mod.fileId === "string" ? [mod.fileId] : []),
+        )
+      : undefined;
     const enrichedPackInfo = {
       ...packInfo,
       loaderVersion,
-      mods: packInfo.mods.map((mod) => ({
-        ...mod,
-        ...(curseForgeMods
-          ? {
-              name: curseForgeMods.get(mod.id)?.displayName,
-              version: curseForgeMods.get(mod.id)?.installedVersion,
-            }
-          : {}),
-        ...(modrinthMeta
-          ? { name: modrinthMeta.get(mod.id)?.title }
-          : {}),
-      })),
+      // Só sobrescreve quando há valor resolvido; `name: undefined` apagava o
+      // nome que já vinha no pack.
+      mods: packInfo.mods.map((mod) => {
+        const cfMod = curseForgeMods?.get(mod.id);
+        const mrTitle = modrinthMeta?.get(mod.id)?.title;
+        const mrVersion = modrinthInstalled?.get(String(mod.fileId))?.versionNumber;
+        return {
+          ...mod,
+          ...(cfMod?.displayName ? { name: cfMod.displayName } : {}),
+          ...(cfMod?.installedVersion ? { version: cfMod.installedVersion } : {}),
+          ...(mrTitle ? { name: mrTitle } : {}),
+          ...(mrVersion ? { version: extractVersionFromFileName(mrVersion) } : {}),
+        };
+      }),
     };
-    const installedMods: InstalledMod[] = packInfo.mods.map((mod) => ({
-      id: mod.id,
-      currentVersion: curseForgeMods?.get(mod.id)?.installedVersion
-        ?? (mod.fileId === undefined ? "unknown" : String(mod.fileId)),
-      name: curseForgeMods?.get(mod.id)?.displayName ?? modrinthMeta?.get(mod.id)?.title,
-    }));
+    const installedMods: InstalledMod[] = packInfo.mods.map((mod) => {
+      const installedVersion = modrinthInstalled?.get(String(mod.fileId));
+      return {
+        id: mod.id,
+        currentVersion: curseForgeMods?.get(mod.id)?.installedVersion
+          ?? (installedVersion
+            ? extractVersionFromFileName(installedVersion.versionNumber)
+            : packInfo.format === "modrinth" || mod.fileId === undefined
+              ? "unknown"
+              : String(mod.fileId)),
+        name: curseForgeMods?.get(mod.id)?.displayName ?? modrinthMeta?.get(mod.id)?.title,
+        ...(installedVersion
+          ? { versionId: installedVersion.id, publishedAt: installedVersion.publishedAt }
+          : {}),
+      };
+    });
 
     const reports = await analyzeModpack(
       installedMods,

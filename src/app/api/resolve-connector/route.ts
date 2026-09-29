@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return resolveConnector(body.gameVersion, body.loader);
+    return await resolveConnector(body.gameVersion, body.loader);
   } catch (error) {
     console.error("[resolve-connector] Falha ao resolver Sinytra Connector", error);
     return NextResponse.json(
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   const loader = url.searchParams.get("loader") ?? "neoforge";
 
   try {
-    return resolveConnector(gameVersion, loader);
+    return await resolveConnector(gameVersion, loader);
   } catch (error) {
     console.error("[resolve-connector] Falha ao resolver Sinytra Connector", error);
     return NextResponse.json(

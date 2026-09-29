@@ -6,6 +6,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       modName?: unknown;
       errorText?: unknown;
+      gameVersion?: unknown;
     };
 
     if (typeof body.modName !== "string" || !body.modName.trim()) {
@@ -18,7 +19,10 @@ export async function POST(request: Request) {
     const errorText = typeof body.errorText === "string"
       ? body.errorText
       : undefined;
-    const result = await searchCommunityReports(body.modName, errorText);
+    const gameVersion = typeof body.gameVersion === "string" && /^[\w.-]{1,20}$/.test(body.gameVersion)
+      ? body.gameVersion
+      : undefined;
+    const result = await searchCommunityReports(body.modName, errorText, gameVersion);
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
     console.error("[search-community-reports] Falha ao buscar relatos", error);

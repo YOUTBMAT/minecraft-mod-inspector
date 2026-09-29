@@ -108,24 +108,28 @@ export async function analyzeModpack(
         }
 
         report.latestFile = update.latestFile;
-        if (update.latestVersionNumber !== installedMod.currentVersion) {
+        if (isModrinthUpdateAvailable(installedMod, update)) {
           report.status = "SAFE_UPDATE";
           report.latestVersion = update.latestVersionNumber;
-          addIncompatibleConflicts(
-            report,
-            installedMap,
-            update,
-            reports,
-            conflictingModIds,
-          );
-          roots.push({
-            rootId: installedMod.id,
-            requirements: toModrinthRequirements(
-              installedMod.id,
-              update,
-              installedMod.id,
-            ),
-          });
+        }
+
+        // Dependências e incompatibilidades valem para todo mod, não só para os
+        // que têm atualização (igual ao fluxo CurseForge). Antes, um mod já
+        // atualizado nunca tinha as dependências ausentes reportadas.
+        addIncompatibleConflicts(
+          report,
+          installedMap,
+          update,
+          reports,
+          conflictingModIds,
+        );
+        const requirements = toModrinthRequirements(
+          installedMod.id,
+          update,
+          installedMod.id,
+        );
+        if (requirements.length > 0) {
+          roots.push({ rootId: installedMod.id, requirements });
         }
       }),
     );
@@ -485,6 +489,27 @@ function addIncompatibleConflicts(
   }
 }
 
+/**
+ * Compara pelo id da versão (e pela data, para não sugerir "downgrade" quando o
+ * usuário está numa beta mais nova que o último release). Comparar
+ * version_number com o id/"unknown" fazia todo mod aparecer como atualizável.
+ */
+function isModrinthUpdateAvailable(
+  installedMod: InstalledMod,
+  update: NonNullable<ModrinthUpdate>,
+): boolean {
+  if (!installedMod.versionId) {
+    return false; // versão instalada desconhecida: não dá para afirmar que há update
+  }
+  if (installedMod.versionId === update.latestVersionId) {
+    return false;
+  }
+  if (installedMod.publishedAt) {
+    return Date.parse(update.releaseDate) > Date.parse(installedMod.publishedAt);
+  }
+  return true;
+}
+
 function createReport(installedMod: InstalledMod): ModAnalysisReport {
   return {
     modId: installedMod.id,
@@ -541,7 +566,7 @@ function getFinalStatus(
 }
 
 function isUnknownVersion(version: string | undefined): boolean {
-  return !version || /^(?:não identificada|arquivo unknown)$/i.test(version.trim());
+  return !version || /^(?:unknown|não identificada|arquivo unknown)$/i.test(version.trim());
 }
 
 function isContinuityMod(displayName: string, projectId: string): boolean {

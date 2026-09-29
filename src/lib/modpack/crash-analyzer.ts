@@ -8,28 +8,30 @@ export function analyzeCrashLog(logText: string): AnalysisReport {
     /(Duplicate key|armor_material)/i.test(logText)
   ) {
     const resourceMatch = logText.match(/ResourceKey\[(.*?)\]/i);
-    const modMatches = logText.match(/[a-zA-Z0-9_-]+\.jar/gi);
+    const modMatches = logText.match(/[\w+.-]+?\.jar/gi);
     issues.push({
       id: "ERR_REGISTRY_DUPLICATE",
       category: "REGISTRY_COLLISION",
       severity: "CRITICAL",
       title: "Conflito de Registro de Recursos (Duplicidade)",
       description: `O NeoForge impediu a inicialização devido ao registro duplicado do recurso: ${resourceMatch?.[1] ?? "Recurso Compartilhado"}.`,
-      offendingMods: modMatches ? Array.from(new Set(modMatches)) : ["Mod de Backport"],
+      offendingMods: modMatches ? Array.from(new Set(modMatches)) : [],
       suggestedAction: "Remova um dos mods de Backport redundantes para a 1.21.1.",
       ...(resourceMatch?.[1] ? { affectedResource: resourceMatch[1] } : {}),
     });
   }
 
-  if (/Trying to access unbound value|DeferredRegister/i.test(logText)) {
+  // "DeferredRegister" aparece em qualquer stack trace de mod NeoForge; só a
+  // mensagem de valor não vinculado indica acesso prematuro ao registro.
+  if (/Trying to access unbound value/i.test(logText)) {
     issues.push({
       id: "ERR_EARLY_REGISTRY",
       category: "EARLY_REGISTER_ACCESS",
       severity: "HIGH",
       title: "Acesso Prematuro a Registro Não Finalizado",
       description: "Um addon tentou acessar um registro antes da conclusão do RegisterEvent do NeoForge.",
-      offendingMods: ["createnuclear", "extra_gauges"],
-      suggestedAction: "Alinhe as versões dos addons com a versão exata do Create ou faça rollback dos addons.",
+      offendingMods: extractJarNames(logText),
+      suggestedAction: "Alinhe as versões dos addons com a versão exata do mod base (ex.: Create) ou faça rollback dos addons citados no log.",
     });
   }
 
@@ -40,7 +42,7 @@ export function analyzeCrashLog(logText: string): AnalysisReport {
       severity: "HIGH",
       title: "Configuração Incompatível do Sodium/Embeddium",
       description: "O arquivo de opções do Sodium não existe ou não pôde ser desserializado.",
-      offendingMods: ["sodium", "embeddium"],
+      offendingMods: extractJarNames(logText),
       suggestedAction: "Exclua config/sodium-options.json para recriar os padrões compatíveis.",
     });
   }
@@ -52,7 +54,7 @@ export function analyzeCrashLog(logText: string): AnalysisReport {
       severity: "CRITICAL",
       title: "Sinytra Connector ausente",
       description: "Um mod Fabric foi carregado em NeoForge sem o Sinytra Connector.",
-      offendingMods: ["continuity", "connector"],
+      offendingMods: extractJarNames(logText),
       suggestedAction: "Inclua uma versão do Sinytra Connector compatível com Minecraft 1.21.1 e NeoForge.",
     });
   }
@@ -69,4 +71,9 @@ export function analyzeCrashLog(logText: string): AnalysisReport {
       compatible: issues.length === 0,
     },
   };
+}
+
+/** Nomes de .jar citados no log (sem inventar culpados quando não há nenhum). */
+function extractJarNames(logText: string): string[] {
+  return Array.from(new Set(logText.match(/[\w+.-]+?\.jar/gi) ?? []));
 }

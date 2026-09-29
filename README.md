@@ -8,7 +8,7 @@ Uma aplicação web de elevado desempenho desenvolvida para analisar *modpacks* 
 
 - **📥 Ingestão Flexível de Ficheiros:** Suporte *drag-and-drop* para ficheiros de *modpack* (`.zip`, `.mrpack`, `.json`) e registos de erro (`.log`, `.txt`).
 - **🧩 Resolução de Dependências em Largura (BFS):** Motor de análise recursiva que identifica dependências em falta, versões incompatíveis e atualizações necessárias via APIs do Modrinth e CurseForge.
-- **⚡ Cache em Memória Otimizada:** Redução drástica de chamadas de rede e prevenção de *rate limiting* na API do Modrinth durante a verificação de múltiplos *mods*.
+- **⚡ Cache e Controle de Concorrência:** Cache em memória por instância do servidor (não é partilhado entre instâncias serverless), limite de pedidos simultâneos e *retry* com `Retry-After` para respeitar o *rate limit* da API do Modrinth.
 - **🛠️ Diagnóstico Automático de Crash Logs:** Analisador baseado em *Regex* que cobre falhas de *Mixin*, dependências ausentes, IDs de mod duplicados, memória insuficiente (*OutOfMemoryError*), mods incompatíveis entre si e ficheiros `.jar` corrompidos.
 - **⚠️ Deteção de Conflitos Conhecidos:** Lista selecionada de combinações de mods conhecidas por causar problemas (ex.: OptiFine + Sodium/Iris, múltiplos visualizadores de receitas), sinalizadas no painel mesmo quando não há atualização envolvida.
 - **📊 Painel Interativo (Dashboard):** Visualização clara com *badges* de estado, filtros dinâmicos e rastreamento de dependências.
@@ -27,19 +27,19 @@ Uma aplicação web de elevado desempenho desenvolvida para analisar *modpacks* 
 | **Estilização** | [Tailwind CSS v4](https://tailwindcss.com/) |
 | **Processamento de Ficheiros** | [JSZip](https://stuk.github.io/jszip/) |
 | **Integração de APIs** | [Modrinth API v2](https://docs.modrinth.com/) e [CurseForge API](https://docs.curseforge.com/) |
-| **Qualidade de Código** | ESLint & TypeScript `tsc` |
+| **Qualidade de Código** | ESLint (`npm run lint`) e TypeScript (`npm run typecheck`) |
 
 ---
 
 ## 📋 Pré-requisitos
 
-Esta aplicação requer o **Node.js 20.0.0 ou superior** devido aos vínculos nativos exigidos pelo Tailwind CSS v4 (`@tailwindcss/oxide`).
+Esta aplicação requer o **Node.js 20.9.0 ou superior** (mínimo do Next.js 16; o Tailwind CSS v4 também usa vínculos nativos). Recomenda-se o Node 22 LTS, já que o Node 20 chegou ao fim do suporte.
 
 Se utiliza o **NVM** (*Node Version Manager*), ative a versão correta com:
 
 ```bash
-nvm install 20
-nvm use 20
+nvm install 22
+nvm use 22
 ```
 
 ---
@@ -48,7 +48,7 @@ nvm use 20
 
 1. **Clonar o repositório:**
    ```bash
-   git clone [https://github.com/YOUTBMAT/minecraft-mod-inspector.git](https://github.com/YOUTBMAT/minecraft-mod-inspector.git)
+   git clone https://github.com/YOUTBMAT/minecraft-mod-inspector.git
    cd minecraft-mod-inspector
    ```
 

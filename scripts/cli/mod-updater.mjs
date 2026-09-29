@@ -18,7 +18,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdir, readFile, writeFile, rename, mkdir, stat } from "node:fs/promises";
+import { readdir, readFile, writeFile, rename, mkdir, stat, rm } from "node:fs/promises";
 import path from "node:path";
 
 const MODRINTH_API = "https://api.modrinth.com/v2";
@@ -63,6 +63,31 @@ Notes:
 `);
 }
 
+/** fetch com retry em 429/5xx (respeita Retry-After) para não tratar rate limit como "sem versão". */
+async function fetchWithRetry(url, options = {}, retries = 3) {
+  for (let attempt = 0; ; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, options);
+    } catch (error) {
+      if (attempt >= retries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      continue;
+    }
+    if (response.status !== 429 && response.status < 500) {
+      return response;
+    }
+    if (attempt >= retries) {
+      return response;
+    }
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 10_000)
+      : 1000 * (attempt + 1);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 async function sha1File(filePath) {
   const buffer = await readFile(filePath);
   return createHash("sha1").update(buffer).digest("hex");
@@ -79,7 +104,7 @@ function chunk(array, size) {
 async function lookupVersionsByHash(hashes) {
   const result = new Map();
   for (const batch of chunk(hashes, HASH_BATCH_SIZE)) {
-    const response = await fetch(`${MODRINTH_API}/version_files`, {
+    const response = await fetchWithRetry(`${MODRINTH_API}/version_files`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -105,12 +130,15 @@ async function fetchLatestVersion(projectId, gameVersion, loader) {
   url.searchParams.set("game_versions", JSON.stringify([gameVersion]));
   url.searchParams.set("loaders", JSON.stringify([loader]));
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     headers: { "User-Agent": USER_AGENT },
   });
 
-  if (!response.ok) {
+  if (response.status === 404) {
     return null;
+  }
+  if (!response.ok) {
+    throw new Error(`Modrinth version lookup failed for ${projectId}: HTTP ${response.status}`);
   }
 
   const versions = await response.json();
@@ -118,9 +146,12 @@ async function fetchLatestVersion(projectId, gameVersion, loader) {
     return null;
   }
 
-  return versions
+  // Só sobe para beta/alpha se o projeto não tiver nenhum release: antes o
+  // CLI trocava releases estáveis por alphas só por serem mais recentes.
+  const byNewest = versions
     .slice()
-    .sort((a, b) => new Date(b.date_published) - new Date(a.date_published))[0];
+    .sort((a, b) => new Date(b.date_published) - new Date(a.date_published));
+  return byNewest.find((version) => version.version_type === "release") ?? byNewest[0];
 }
 
 function pickPrimaryFile(version) {
@@ -128,18 +159,30 @@ function pickPrimaryFile(version) {
 }
 
 async function downloadAndVerify(file) {
-  const response = await fetch(file.url, { headers: { "User-Agent": USER_AGENT } });
+  const response = await fetchWithRetry(file.url, { headers: { "User-Agent": USER_AGENT } });
   if (!response.ok) {
     throw new Error(`Download failed (HTTP ${response.status}): ${file.url}`);
   }
   const buffer = Buffer.from(await response.arrayBuffer());
+
+  // Verificação obrigatória: antes, sem hash na resposta o arquivo era aceito sem checar nada.
   const expectedSha1 = file.hashes?.sha1;
+  const expectedSha512 = file.hashes?.sha512;
+  if (!expectedSha1 && !expectedSha512) {
+    throw new Error(`No hash published for ${file.filename}; refusing to install unverified file.`);
+  }
   if (expectedSha1) {
     const actualSha1 = createHash("sha1").update(buffer).digest("hex");
     if (actualSha1 !== expectedSha1) {
       throw new Error(
         `Downloaded file hash mismatch for ${file.filename}: expected ${expectedSha1}, got ${actualSha1}`,
       );
+    }
+  }
+  if (expectedSha512) {
+    const actualSha512 = createHash("sha512").update(buffer).digest("hex");
+    if (actualSha512 !== expectedSha512) {
+      throw new Error(`Downloaded file SHA-512 mismatch for ${file.filename}.`);
     }
   }
   return buffer;
@@ -215,13 +258,24 @@ async function main() {
   const upToDate = [];
   const noCompatibleVersion = [];
 
+  const lookupFailed = [];
   for (const mod of identified) {
-    const latest = await fetchLatestVersion(mod.installedVersion.project_id, args.gameVersion, args.loader);
+    let latest;
+    try {
+      latest = await fetchLatestVersion(mod.installedVersion.project_id, args.gameVersion, args.loader);
+    } catch (error) {
+      // Falha de rede/rate limit não é "sem versão compatível": reporta à parte.
+      lookupFailed.push({ mod, reason: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     if (!latest) {
       noCompatibleVersion.push(mod);
       continue;
     }
-    if (latest.id === mod.installedVersion.id) {
+    const installedDate = new Date(mod.installedVersion.date_published);
+    const latestDate = new Date(latest.date_published);
+    // Mesma versão, ou a instalada já é mais nova (ex.: beta) que o último release: não mexer.
+    if (latest.id === mod.installedVersion.id || installedDate >= latestDate) {
       upToDate.push(mod);
       continue;
     }
@@ -229,6 +283,10 @@ async function main() {
   }
 
   console.log(`\n${upToDate.length} mod(s) already up to date.`);
+  if (lookupFailed.length > 0) {
+    console.log(`${lookupFailed.length} mod(s) could not be checked (network/rate limit) — run again later:`);
+    lookupFailed.forEach(({ mod, reason }) => console.log(`  - ${mod.fileName}: ${reason}`));
+  }
   if (noCompatibleVersion.length > 0) {
     console.log(
       `${noCompatibleVersion.length} mod(s) have no version published for Minecraft ${args.gameVersion} / ${args.loader} — they may break on this version:`,
@@ -267,13 +325,32 @@ async function main() {
       continue;
     }
 
+    // O nome vem da API: nunca confiar em separadores de caminho.
+    const safeName = path.basename(file.filename);
+    const targetPath = path.join(modsDir, safeName);
+    const tempPath = `${targetPath}.mod-inspector-tmp`;
+    let originalMoved = false;
+
     try {
+      if (safeName !== mod.fileName && jarHashes.has(safeName)) {
+        throw new Error(`${safeName} already exists in the mods folder; skipping to avoid overwriting it.`);
+      }
       const buffer = await downloadAndVerify(file);
+      // 1) grava o novo em arquivo temporário (se falhar aqui, nada mudou);
+      await writeFile(tempPath, buffer);
+      // 2) move o original para o backup;
       await rename(path.join(modsDir, mod.fileName), path.join(backupDir, mod.fileName));
-      await writeFile(path.join(modsDir, file.filename), buffer);
-      console.log(`  ✓ ${mod.fileName} -> ${file.filename}`);
+      originalMoved = true;
+      // 3) publica o novo com rename atômico.
+      await rename(tempPath, targetPath);
+      console.log(`  ✓ ${mod.fileName} -> ${safeName}`);
       updatedCount += 1;
     } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => {});
+      if (originalMoved) {
+        // Rollback: devolve o original para que o mod não desapareça da pasta.
+        await rename(path.join(backupDir, mod.fileName), path.join(modsDir, mod.fileName)).catch(() => {});
+      }
       console.error(`  ! ${mod.fileName}: ${error instanceof Error ? error.message : error}`);
     }
   }
