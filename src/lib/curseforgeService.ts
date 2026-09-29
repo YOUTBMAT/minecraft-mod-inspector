@@ -611,6 +611,52 @@ export function isUnresolvedCurseForgeMod(mod: CurseForgeResolvedMod): boolean {
     mod.displayName === `Mod ${mod.projectId}`;
 }
 
+export interface CurseForgeProbeResult {
+  ok: boolean;
+  /** Código HTTP devolvido pela API (ausente se nem conectou). */
+  status?: number;
+  /** Cabeçalho `server` da resposta (ex.: "cloudflare" indica bloqueio na borda). */
+  server?: string;
+  contentType?: string;
+  /** Início do corpo da resposta, para distinguir JSON de erro de uma página de bloqueio. */
+  bodySnippet?: string;
+  error?: string;
+}
+
+/**
+ * Faz uma chamada mínima e barata (GET /v1/games/432) para descobrir por que a
+ * API não está respondendo. Nunca inclui a chave no resultado.
+ */
+export async function probeCurseForgeApi(): Promise<CurseForgeProbeResult> {
+  const apiKey = process.env.CURSEFORGE_API_KEY?.trim();
+  if (!apiKey) {
+    return { ok: false, error: "CURSEFORGE_API_KEY não definida" };
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.curseforge.com/v1/games/${CURSEFORGE_MINECRAFT_GAME_ID}`,
+      {
+        headers: { "x-api-key": apiKey, Accept: "application/json" },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const text = await response.text().catch(() => "");
+    return {
+      ok: response.ok,
+      status: response.status,
+      server: response.headers.get("server") ?? undefined,
+      contentType: response.headers.get("content-type") ?? undefined,
+      bodySnippet: text.replace(/\s+/g, " ").slice(0, 200),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export type CurseForgeKeyState = "missing" | "malformed" | "present";
 
 /**

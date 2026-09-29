@@ -5,6 +5,7 @@ import { parseModpackManifest } from "@/lib/modpackParser";
 import {
   getCurseForgeKeyState,
   isUnresolvedCurseForgeMod,
+  probeCurseForgeApi,
   FABRIC_BRIDGE_PROJECT_IDS,
   FABRIC_BRIDGE_PROJECT_SLUGS,
   resolveCurseForgeMods,
@@ -206,7 +207,7 @@ export async function POST(request: Request) {
       }),
     };
 
-    const warnings = buildCurseForgeWarnings(packInfo.format, curseForgeMods);
+    const warnings = await buildCurseForgeWarnings(packInfo.format, curseForgeMods);
 
     return NextResponse.json(
       {
@@ -236,10 +237,10 @@ export async function POST(request: Request) {
  * Sem isto, uma chave ausente/inválida fazia o app mostrar "Mod 123 / Não
  * identificada" para tudo, sem nenhuma explicação.
  */
-function buildCurseForgeWarnings(
+async function buildCurseForgeWarnings(
   format: string,
   curseForgeMods: Map<string, Parameters<typeof isUnresolvedCurseForgeMod>[0]> | undefined,
-): string[] {
+): Promise<string[]> {
   if (format !== "curseforge" || !curseForgeMods || curseForgeMods.size === 0) {
     return [];
   }
@@ -257,15 +258,37 @@ function buildCurseForgeWarnings(
     ];
   }
 
-  const keyHint = keyState === "malformed"
+  let keyHint = keyState === "malformed"
     ? " A chave configurada parece incompleta (o esperado são 60 caracteres começando com $2a$). Em arquivos .env, escape cada $ como \\$."
-    : " Verifique se a chave é válida e se não atingiu o limite de requisições.";
+    : "";
+
+  if (keyState === "present" && unresolved === mods.length) {
+    // Pergunta à própria API o motivo, em vez de adivinhar.
+    keyHint = describeProbe(await probeCurseForgeApi());
+  }
 
   return [
     unresolved === mods.length
       ? `Nenhum dos ${mods.length} mods pôde ser consultado na API do CurseForge.${keyHint}`
       : `${unresolved} de ${mods.length} mods não puderam ser consultados na API do CurseForge; eles aparecem como "Desconhecido / Manual".`,
   ];
+}
+
+function describeProbe(probe: Awaited<ReturnType<typeof probeCurseForgeApi>>): string {
+  if (probe.status === undefined) {
+    return ` Não foi possível conectar à API do CurseForge (${probe.error ?? "erro de rede"}).`;
+  }
+  if (probe.ok) {
+    return ` A API respondeu normalmente (HTTP ${probe.status}) num teste simples, então o problema está em outra chamada; veja os logs do servidor (procure por "[CurseForge]").`;
+  }
+  const edge = probe.server?.toLowerCase().includes("cloudflare") ? " (bloqueio na borda do Cloudflare)" : "";
+  if (probe.status === 401 || probe.status === 403) {
+    return ` A API do CurseForge respondeu HTTP ${probe.status}${edge}: a chave foi recusada ou a requisição foi bloqueada. Gere uma chave nova em console.curseforge.com e/ou abra /api/health?check=curseforge para ver os detalhes.`;
+  }
+  if (probe.status === 429) {
+    return " A API do CurseForge respondeu HTTP 429: limite de requisições atingido. Tente novamente em alguns minutos.";
+  }
+  return ` A API do CurseForge respondeu HTTP ${probe.status}${edge}. Abra /api/health?check=curseforge para ver os detalhes.`;
 }
 
 function maxVersion(...versions: Array<string | undefined>): string {
